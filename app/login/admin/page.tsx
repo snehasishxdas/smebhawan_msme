@@ -240,7 +240,7 @@ export default function AdminPortal() {
       const added = await addTeamMember({
         name: newMemberName,
         role: newMemberRole,
-        bio: newMemberBio || 'Team member at SmeBhawan.',
+        bio: newMemberBio || 'Team member at smebhawan.',
         photo: newMemberPhoto || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
         linkedin: newMemberLinkedin,
       })
@@ -529,7 +529,7 @@ export default function AdminPortal() {
           <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-6">
               <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">SmeBhawan Operations</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">smebhawan Operations</span>
                 <h1 className="font-display text-2xl font-extrabold text-foreground sm:text-3xl mt-1">
                   Credit & Supply Command Board
                 </h1>
@@ -962,7 +962,7 @@ export default function AdminPortal() {
                 <Users className="h-6 w-6 text-accent animate-pulse" />
                 <div>
                   <h2 className="font-display text-xl font-bold text-foreground">Team Roster Management</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Control the public team profile cards on the SmeBhawan landing page.</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Control the public team profile cards on the smebhawan landing page.</p>
                 </div>
               </div>
 

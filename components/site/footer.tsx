@@ -40,7 +40,7 @@ export function Footer() {
             <div className="flex items-center gap-2.5">
               <Logo className="h-8 w-8" />
               <span className="font-display text-lg font-bold tracking-tight text-primary">
-                SmeBhawan
+                smebhawan
               </span>
             </div>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
@@ -80,7 +80,7 @@ export function Footer() {
         </div>
 
         <div className="mt-12 flex flex-col gap-3 border-t border-border pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>© {new Date().getFullYear()} SmeBhawan. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} smebhawan. All rights reserved.</p>
           <p>smehouse25@gmail.com · +91 86172 19004</p>
         </div>
       </div>

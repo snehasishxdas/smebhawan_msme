@@ -17,7 +17,7 @@ export function CTA() {
               </h2>
               <p className="mt-4 max-w-md text-pretty leading-relaxed text-primary-foreground/80">
                 Whether you&apos;re an MSME sourcing raw materials or a supplier
-                looking to reach verified buyers — get early access to SmeBhawan.
+                looking to reach verified buyers — get early access to smebhawan.
               </p>
 
               <div className="mt-8 flex flex-col gap-3 text-sm">

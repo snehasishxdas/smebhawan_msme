@@ -139,7 +139,7 @@ export function Nav() {
             </div>
             <div>
               <span className="block font-display text-lg font-black tracking-tight text-foreground group-hover:text-accent transition-colors">
-                SmeBhawan
+                smebhawan
               </span>
               <span className="block text-[8px] font-semibold uppercase tracking-wider text-muted-foreground -mt-0.5">
                 Building Together

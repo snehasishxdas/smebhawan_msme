@@ -126,7 +126,7 @@ export default function ContactPage() {
                   <div>
                     <h2 className="font-display text-2xl font-bold text-foreground">Enquiry Logs Saved!</h2>
                     <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                      Your doubt has been registered. The SmeBhawan command team will inspect it and email a reply to <span className="font-semibold text-foreground">{email}</span>.
+                      Your doubt has been registered. The smebhawan command team will inspect it and email a reply to <span className="font-semibold text-foreground">{email}</span>.
                     </p>
                   </div>
                   <button

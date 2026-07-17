@@ -15,7 +15,7 @@ export function Credit() {
             Dual Revenue Velocity: Trading Margin & Embedded Working Capital
           </h2>
           <p className="mt-4 text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            SmeBhawan operates a highly optimized business engine, handling both physical raw material procurement and the underlying financial credit layers. By offering transparent spot pricing alongside risk-tiered credit lines directly in the checkout drawer, we unlock operational liquidity for SMBs.
+            smebhawan operates a highly optimized business engine, handling both physical raw material procurement and the underlying financial credit layers. By offering transparent spot pricing alongside risk-tiered credit lines directly in the checkout drawer, we unlock operational liquidity for SMBs.
           </p>
         </div>
 

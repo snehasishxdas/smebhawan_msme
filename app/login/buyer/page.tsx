@@ -354,7 +354,7 @@ export default function BuyerPortal() {
         message: helpMessage
       })
 
-      alert('Your enquiry has been submitted. SmeBhawan underwriters will review it shortly.')
+      alert('Your enquiry has been submitted. smebhawan underwriters will review it shortly.')
       setHelpSubject('')
       setHelpMessage('')
       loadDashboardData()

@@ -32,22 +32,22 @@ export async function POST(request: Request) {
     })
 
     const mailOptions = {
-      from: `"SmeBhawan Support" <${smtpUser}>`,
+      from: `"smebhawan Support" <${smtpUser}>`,
       to: email,
       subject: `Reply to your doubt: ${subject || 'General Enquiry'}`,
-      text: `Hello ${name || 'there'},\n\nThank you for reaching out to SmeBhawan.\n\nHere is the response to your doubt:\n\n"${replyText}"\n\nBest regards,\nSmeBhawan Support Team`,
+      text: `Hello ${name || 'there'},\n\nThank you for reaching out to smebhawan.\n\nHere is the response to your doubt:\n\n"${replyText}"\n\nBest regards,\nsmebhawan Support Team`,
       html: `
         <div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 600px; border: 1px solid #e5e7eb; border-radius: 8px;">
-          <h2 style="color: #10b981; margin-top: 0;">SmeBhawan Support</h2>
+          <h2 style="color: #10b981; margin-top: 0;">smebhawan Support</h2>
           <p>Hello ${name || 'there'},</p>
-          <p>Thank you for reaching out to SmeBhawan.</p>
+          <p>Thank you for reaching out to smebhawan.</p>
           <p>Here is the response to your enquiry:</p>
           <div style="background: #f3f4f6; padding: 15px; border-left: 4px solid #10b981; margin: 15px 0; border-radius: 4px;">
             <p style="margin: 0; font-style: italic; white-space: pre-wrap;">${replyText}</p>
           </div>
           <br>
           <p style="margin: 0;">Best regards,</p>
-          <p style="margin: 0; font-weight: bold; color: #10b981;">SmeBhawan Support Team</p>
+          <p style="margin: 0; font-weight: bold; color: #10b981;">smebhawan Support Team</p>
         </div>
       `
     }

@@ -19,7 +19,7 @@ const steps = [
   {
     icon: Truck,
     title: 'Flexible fulfilment',
-    body: 'SMBs self-collect via any route at the listed price, or let SmeBhawan arrange delivery for a flat, upfront logistics charge.',
+    body: 'SMBs self-collect via any route at the listed price, or let smebhawan arrange delivery for a flat, upfront logistics charge.',
   },
 ]
 
@@ -40,7 +40,7 @@ export function HowItWorks() {
         <div className="mt-10 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
           {[
             { label: 'Supplier', icon: Factory },
-            { label: 'SmeBhawan', icon: Building2, highlight: true },
+            { label: 'smebhawan', icon: Building2, highlight: true },
             { label: 'SMB buyer', icon: Boxes },
           ].map((n, i, arr) => (
             <div key={n.label} className="flex flex-1 items-center gap-3">

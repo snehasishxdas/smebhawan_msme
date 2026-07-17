@@ -22,7 +22,7 @@ const items = [
   {
     name: 'TReDS Invoice Financing',
     tag: 'Phase 2/3',
-    desc: 'Large repeat buyers can route SmeBhawan invoices toward RBI-regulated TReDS discounting — reducing balance-sheet risk.',
+    desc: 'Large repeat buyers can route smebhawan invoices toward RBI-regulated TReDS discounting — reducing balance-sheet risk.',
     icon: Handshake,
   },
 ]
@@ -48,7 +48,7 @@ export function Ecosystem() {
             Plugged into India&apos;s MSME digital backbone
           </h2>
           <p className="mt-4 text-pretty leading-relaxed text-muted-foreground">
-            SmeBhawan is built to be a credible player aligned with the Ministry
+            smebhawan is built to be a credible player aligned with the Ministry
             of MSME — not just another private intermediary. We reference and
             verify against the real government ecosystem.
           </p>

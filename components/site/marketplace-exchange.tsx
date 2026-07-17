@@ -596,7 +596,7 @@ export function MarketplaceExchange() {
                 <span>₹{estimatorCalc.baseCost.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex justify-between text-muted-foreground">
-                <span>SmeBhawan Margin ({estimatorProd.marginRate * 100}%)</span>
+                <span>smebhawan Margin ({estimatorProd.marginRate * 100}%)</span>
                 <span>₹{estimatorCalc.platformMargin.toLocaleString('en-IN')}</span>
               </div>
               {estimatorLogistics === 'arranged' && (
@@ -708,7 +708,7 @@ export function MarketplaceExchange() {
                                 <span className="block mt-0.5">Price: ₹{item.product.rate.toLocaleString('en-IN')}/MT</span>
                               </div>
                               <div>
-                                <span className="block font-medium">Logistics: {item.logistics === 'arranged' ? 'SmeBhawan' : 'Self'}</span>
+                                <span className="block font-medium">Logistics: {item.logistics === 'arranged' ? 'smebhawan' : 'Self'}</span>
                                 <span className="block mt-0.5">Pay Terms: {item.payment === 'credit' ? '16% Credit Line' : 'Upfront Spot'}</span>
                               </div>
                             </div>
@@ -726,7 +726,7 @@ export function MarketplaceExchange() {
                           <span>₹{cartTotals.baseCost.toLocaleString('en-IN')}</span>
                         </div>
                         <div className="flex justify-between text-muted-foreground">
-                          <span>SmeBhawan Combined Margins</span>
+                          <span>smebhawan Combined Margins</span>
                           <span>₹{cartTotals.margin.toLocaleString('en-IN')}</span>
                         </div>
                         <div className="flex justify-between text-muted-foreground">
@@ -820,7 +820,7 @@ export function MarketplaceExchange() {
                       <div>
                         <p className="text-xs font-bold text-amber-500">Embedded Credit Term Agreement</p>
                         <p className="text-[10px] text-muted-foreground mt-0.5 leading-normal">
-                          By placing this order, you apply for 16% annualized credit. Approval requires KYC validation by SmeBhawan credit officers inside the Operations Console.
+                          By placing this order, you apply for 16% annualized credit. Approval requires KYC validation by smebhawan credit officers inside the Operations Console.
                         </p>
                       </div>
                     </div>

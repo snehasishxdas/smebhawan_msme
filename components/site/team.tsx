@@ -48,7 +48,7 @@ export function Team() {
             Builders Backing India&apos;s Industrial Core
           </h2>
           <p className="mt-4 text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            SmeBhawan pairs on-ground manufacturing business expertise with modern financial technology infrastructure to scale procurement and credit control efficiently.
+            smebhawan pairs on-ground manufacturing business expertise with modern financial technology infrastructure to scale procurement and credit control efficiently.
           </p>
         </div>
 

@@ -17,9 +17,9 @@ const spaceGrotesk = Space_Grotesk({
 })
 
 export const metadata: Metadata = {
-  title: 'SmeBhawan — Building Together | Raw Materials & Credit for India’s MSMEs',
+  title: 'smebhawan — Building Together | Raw Materials & Credit for India’s MSMEs',
   description:
-    'SmeBhawan connects India’s MSMEs directly to vetted raw-material suppliers — cutting out middlemen and layering in embedded credit. Aligned with the Ministry of MSME ecosystem.',
+    'smebhawan connects India’s MSMEs directly to vetted raw-material suppliers — cutting out middlemen and layering in embedded credit. Aligned with the Ministry of MSME ecosystem.',
   generator: 'v0.app',
   keywords: [
     'MSME',
@@ -32,19 +32,15 @@ export const metadata: Metadata = {
     'India manufacturing',
   ],
   openGraph: {
-    title: 'SmeBhawan — Building Together',
+    title: 'smebhawan — Building Together',
     description:
       'B2B raw-materials procurement & credit platform for India’s MSMEs. Source direct, skip the middlemen, unlock credit.',
     type: 'website',
     images: ['/warehouse.png'],
   },
   icons: {
-    icon: [
-      { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
-      { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
-      { url: '/icon.svg', type: 'image/svg+xml' },
-    ],
-    apple: '/apple-icon.png',
+    icon: '/logo.jpg',
+    apple: '/logo.jpg',
   },
 }
 
