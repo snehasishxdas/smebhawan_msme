@@ -483,14 +483,18 @@ export const getDbOrders = async (): Promise<Order[]> => {
               .select('*')
               .order('date', { ascending: false })
             if (syncedList) {
-              localStorage.setItem('smebhawan_orders', JSON.stringify(syncedList))
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('smebhawan_orders', JSON.stringify(syncedList))
+              }
               return syncedList
             }
           }
         }
       }
       
-      localStorage.setItem('smebhawan_orders', JSON.stringify(data))
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('smebhawan_orders', JSON.stringify(data))
+      }
       return data
     }
   } catch (err) {
@@ -614,13 +618,17 @@ export const getDbDoubts = async (): Promise<Doubt[]> => {
               .select('*')
               .order('created_at', { ascending: false })
             if (syncedList) {
-              localStorage.setItem('smebhawan_doubts', JSON.stringify(syncedList))
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('smebhawan_doubts', JSON.stringify(syncedList))
+              }
               return syncedList
             }
           }
         }
       }
-      localStorage.setItem('smebhawan_doubts', JSON.stringify(data))
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('smebhawan_doubts', JSON.stringify(data))
+      }
       return data
     }
   } catch (err) {
@@ -751,7 +759,9 @@ export const getDbUsers = async (role?: 'customer' | 'supplier'): Promise<UserPr
     if (error) throw error
 
     if (data) {
-      localStorage.setItem('smebhawan_users', JSON.stringify(data))
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('smebhawan_users', JSON.stringify(data))
+      }
       return data
     }
   } catch (err) {
