@@ -26,7 +26,7 @@ const links = [
   { label: 'Liquidity Desk', href: '/#credit' },
   { label: 'Compliance Base', href: '/#ecosystem' },
   { label: 'Procurement Exchange', href: '/shop' },
-  { label: 'Contact Us', href: '/contact' },
+  { label: 'Contact Us', href: '/#cta' },
 ]
 
 const signInRoles = [

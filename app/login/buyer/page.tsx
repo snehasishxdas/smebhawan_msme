@@ -68,9 +68,10 @@ interface Order {
     gst: number
     total: number
   }
-  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Delivered'
+  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Out for Dispatch' | 'Shipped' | 'Out for Delivery' | 'Delivered'
   date: string
   creditTerms: { interestRate: string; tenureDays: number; status: string } | null
+  dispatchDetails?: { vehicleNo: string; lrNo: string; dispatchedAt: string } | null
 }
 
 export default function BuyerPortal() {
@@ -99,11 +100,24 @@ export default function BuyerPortal() {
   const [editPhone, setEditPhone] = useState('')
   const [editCompanyName, setEditCompanyName] = useState('')
   const [editGstin, setEditGstin] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editOtp, setEditOtp] = useState('')
+  const [editOtpSent, setEditOtpSent] = useState(false)
+  const [editGeneratedCode, setEditGeneratedCode] = useState('')
+  const [countdownNotification, setCountdownNotification] = useState<string | null>(null)
+  const [countdownSeconds, setCountdownSeconds] = useState(5)
 
   // Help Section State
   const [helpSubject, setHelpSubject] = useState('')
   const [helpMessage, setHelpMessage] = useState('')
   const [submittingHelp, setSubmittingHelp] = useState(false)
+
+  // Floating Toast Alert State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
 
   // Load session from localStorage on mount
   useEffect(() => {
@@ -172,7 +186,7 @@ export default function BuyerPortal() {
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email || !email.includes('@')) {
-      alert('Please enter a valid email address')
+      showToast('Please enter a valid email address', 'error')
       return
     }
 
@@ -182,7 +196,7 @@ export default function BuyerPortal() {
         // Sign In - check if email is registered
         const user = await getUserProfileByEmail(email)
         if (!user || user.role !== 'customer') {
-          alert('This email address is not registered as a Customer. Please switch to Sign Up.')
+          showToast('This email address is not registered as a Customer. Please switch to Sign Up.', 'error')
           setLoading(false)
           return
         }
@@ -204,10 +218,10 @@ export default function BuyerPortal() {
       })
 
       setOtpSent(true)
-      alert(`OTP sent successfully to: ${email}`)
+      showToast(`OTP verification code sent successfully to: ${email}`, 'success')
     } catch (err) {
       console.error(err)
-      alert('Failed to dispatch OTP. Please check SMTP parameters.')
+      showToast('Failed to dispatch OTP. Please check SMTP parameters.', 'error')
     } finally {
       setLoading(false)
     }
@@ -216,7 +230,7 @@ export default function BuyerPortal() {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     if (otp.length < 6) {
-      alert('Please enter a valid 6-digit OTP')
+      showToast('Please enter a valid 6-digit OTP', 'error')
       return
     }
 
@@ -224,7 +238,7 @@ export default function BuyerPortal() {
     try {
       const isValid = await verifyOTP(email, otp)
       if (!isValid) {
-        alert('Invalid or expired OTP. Please try again.')
+        showToast('Invalid or expired OTP. Please try again.', 'error')
         setLoading(false)
         return
       }
@@ -271,7 +285,7 @@ export default function BuyerPortal() {
       }
     } catch (err) {
       console.error(err)
-      alert('Error during verification. Please try again.')
+      showToast('Error during verification. Please try again.', 'error')
     } finally {
       setLoading(false)
     }
@@ -294,6 +308,10 @@ export default function BuyerPortal() {
     setEditPhone(session.phone)
     setEditCompanyName(session.companyName)
     setEditGstin(session.gstin)
+    setEditEmail(session.email)
+    setEditOtp('')
+    setEditOtpSent(false)
+    setCountdownNotification(null)
     setShowEditModal(true)
   }
 
@@ -302,19 +320,72 @@ export default function BuyerPortal() {
     if (!session) return
     setLoading(true)
     try {
+      const isEmailChanged = editEmail.trim().toLowerCase() !== session.email.trim().toLowerCase()
+
+      if (isEmailChanged && !editOtpSent) {
+        const existing = await getUserProfileByEmail(editEmail)
+        if (existing) {
+          alert('This email is already registered and cannot be claimed.')
+          setLoading(false)
+          return
+        }
+
+        const code = Math.floor(100000 + Math.random() * 900000).toString()
+        setEditGeneratedCode(code)
+        await createOTP(editEmail, code)
+
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'send-otp',
+            email: editEmail,
+            code: code
+          })
+        })
+
+        setEditOtpSent(true)
+        setCountdownSeconds(5)
+        setCountdownNotification(`Verification OTP code sent to: ${editEmail}`)
+        const interval = setInterval(() => {
+          setCountdownSeconds((prev) => {
+            if (prev <= 1) {
+              clearInterval(interval)
+              setCountdownNotification(null)
+              return 5
+            }
+            return prev - 1
+          })
+        }, 1000)
+
+        setLoading(false)
+        return
+      }
+
+      if (isEmailChanged && editOtpSent) {
+        const isValid = await verifyOTP(editEmail, editOtp)
+        if (!isValid) {
+          alert('Invalid or expired OTP. Please try again.')
+          setLoading(false)
+          return
+        }
+      }
+
       const updates = {
         name: editName,
         place: editPlace,
         phone: editPhone,
         companyName: editCompanyName,
-        gstin: editGstin
+        gstin: editGstin,
+        email: editEmail.trim().toLowerCase()
       }
       const updated = await updateUserProfile(session.id, updates)
       if (updated) {
         localStorage.setItem('smebhawan_user_session', JSON.stringify(updated))
         setSession(updated)
         setShowEditModal(false)
-        alert('Profile details updated successfully! Sync notification sent to your registered email.')
+        setEditOtpSent(false)
+        showToast('Profile details updated successfully! Sync notification sent to your registered email.', 'success')
         
         // Notify Profile Update activity
         await fetch('/api/send-email', {
@@ -329,7 +400,7 @@ export default function BuyerPortal() {
         })
       }
     } catch (err) {
-      alert('Failed to update profile settings.')
+      showToast('Failed to update profile settings.', 'error')
     } finally {
       setLoading(false)
     }
@@ -340,7 +411,7 @@ export default function BuyerPortal() {
     e.preventDefault()
     if (!session) return
     if (!helpSubject || !helpMessage) {
-      alert('Please fill in both Subject and Message fields.')
+      showToast('Please fill in both Subject and Message fields.', 'error')
       return
     }
 
@@ -354,7 +425,7 @@ export default function BuyerPortal() {
         message: helpMessage
       })
 
-      alert('Your enquiry has been submitted. smebhawan underwriters will review it shortly.')
+      showToast('Your enquiry has been submitted. smebhawan underwriters will review it shortly.', 'success')
       setHelpSubject('')
       setHelpMessage('')
       loadDashboardData()
@@ -834,7 +905,7 @@ export default function BuyerPortal() {
                           </div>
                           <button
                             type="button"
-                            onClick={() => alert(`Downloaded GST invoice for order ${o.orderId}`)}
+                            onClick={() => showToast(`GST tax invoice downloaded successfully for order ${o.orderId}`, 'success')}
                             className="p-2 hover:bg-muted text-accent rounded-xl border border-border hover:border-accent/35 transition-colors"
                           >
                             <Download className="h-4 w-4" />
@@ -965,6 +1036,44 @@ export default function BuyerPortal() {
                 />
               </div>
 
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-muted-foreground">Registered Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                />
+              </div>
+
+              {editOtpSent && (
+                <div className="space-y-3.5 border-t border-white/10 pt-4 mt-2">
+                  {countdownNotification && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-2xl text-xs text-emerald-500 flex flex-col gap-1.5 animate-pulse mb-3">
+                      <div className="flex justify-between items-center">
+                        <span className="font-extrabold flex items-center gap-1">✉️ Verification Code Sent</span>
+                        <span className="bg-emerald-500 text-white font-bold px-2 py-0.5 rounded-lg text-[9px]">{countdownSeconds}s</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">{countdownNotification}</p>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="font-semibold text-muted-foreground text-[10px] uppercase">Enter 6-Digit OTP sent to new email *</label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      value={editOtp}
+                      onChange={(e) => setEditOtp(e.target.value)}
+                      placeholder="XXXXXX"
+                      className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground text-center font-bold tracking-[0.2em] outline-none focus:border-accent"
+                    />
+                  </div>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={loading}
@@ -974,6 +1083,13 @@ export default function BuyerPortal() {
               </button>
             </form>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[999] bg-slate-900 border border-emerald-500/20 text-emerald-500 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-bounce">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+          <span className="text-xs font-bold font-sans tracking-wide">{toast.message}</span>
         </div>
       )}
 

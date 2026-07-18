@@ -2,6 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Inter, Space_Grotesk } from 'next/font/google'
 import { BackgroundVideo } from '@/components/site/bg-video'
+import { Preloader } from '@/components/site/preloader'
 import './globals.css'
 
 const inter = Inter({
@@ -60,6 +61,7 @@ export default function RootLayout({
       className={`dark ${inter.variable} ${spaceGrotesk.variable}`}
     >
       <body className="antialiased bg-slate-950 font-sans text-foreground">
+        <Preloader />
         <BackgroundVideo />
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}

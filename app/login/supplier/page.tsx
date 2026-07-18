@@ -39,8 +39,12 @@ import {
   verifyOTP,
   getDbDoubts,
   sendDbDoubt,
+  getDbProducts,
+  getPendingProducts,
+  createPendingProduct,
   type UserProfile,
-  type Doubt
+  type Doubt,
+  type PendingProduct
 } from '@/lib/supabase'
 
 interface Order {
@@ -74,9 +78,10 @@ interface Order {
     gst: number
     total: number
   }
-  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Delivered'
+  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Out for Dispatch' | 'Shipped' | 'Out for Delivery' | 'Delivered'
   date: string
   creditTerms: { interestRate: string; tenureDays: number; status: string } | null
+  dispatchDetails?: { vehicleNo: string; lrNo: string; dispatchedAt: string } | null
 }
 
 export default function SupplierPortal() {
@@ -119,6 +124,33 @@ export default function SupplierPortal() {
   // Inventory price state
   const [bitumenPrice, setBitumenPrice] = useState('50832')
 
+  // Product addition/editing states
+  const [productsList, setProductsList] = useState<any[]>([])
+  const [pendingListings, setPendingListings] = useState<PendingProduct[]>([])
+  const [showListModal, setShowListModal] = useState(false)
+  const [showEditProductModal, setShowEditProductModal] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState<any>(null)
+  
+  const [pName, setPName] = useState('')
+  const [pCategory, setPCategory] = useState('Chemicals & Binders')
+  const [pRate, setPRate] = useState(0)
+  const [pUnit, setPUnit] = useState('MT')
+  const [pMinOrder, setPMinOrder] = useState(1)
+  const [pSpec, setPSpec] = useState('')
+  const [pInventory, setPInventory] = useState(0)
+
+  // Floating Toast Alert State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
+  const [pCert, setPCert] = useState('')
+
+  // In-page countdown alerts state
+  const [countdownNotification, setCountdownNotification] = useState<string | null>(null)
+  const [countdownSeconds, setCountdownSeconds] = useState(5)
+
   // Load session from localStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -153,13 +185,26 @@ export default function SupplierPortal() {
       (d) => d.email.toLowerCase() === session.email.toLowerCase()
     )
     setDoubts(supplierDoubts)
+
+    // Load products and pending listing approvals
+    const list = await getDbProducts()
+    setProductsList(list)
+    const pended = await getPendingProducts()
+    setPendingListings(pended)
   }
 
   useEffect(() => {
     if (isLoggedIn && session && session.status !== 'pending') {
       loadDashboardData()
-      window.addEventListener('storage', loadDashboardData)
-      return () => window.removeEventListener('storage', loadDashboardData)
+      
+      const handleStorageChange = () => {
+        loadDashboardData()
+      }
+
+      window.addEventListener('storage', handleStorageChange)
+      return () => {
+        window.removeEventListener('storage', handleStorageChange)
+      }
     }
   }, [isLoggedIn, session])
 
@@ -183,7 +228,7 @@ export default function SupplierPortal() {
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email || !email.includes('@')) {
-      alert('Please enter a valid email address')
+      showToast('Please enter a valid email address', 'error')
       return
     }
 
@@ -193,9 +238,22 @@ export default function SupplierPortal() {
         // Sign In - check if email is registered
         const user = await getUserProfileByEmail(email)
         if (!user || user.role !== 'supplier') {
-          alert('This email address is not registered as a Supplier. Please switch to Sign Up.')
+          showToast('This email address is not registered as a Supplier. Please switch to Sign Up.', 'error')
           setLoading(false)
           return
+        }
+      } else {
+        const existing = await getUserProfileByEmail(email)
+        if (existing) {
+          if (existing.role === 'customer') {
+            showToast('This email is already registered as a Customer and cannot be used for a Supplier account.', 'error')
+            setLoading(false)
+            return
+          } else {
+            showToast('This email is already registered as a Supplier. Please switch to Sign In mode.', 'info')
+            setLoading(false)
+            return
+          }
         }
       }
 
@@ -215,10 +273,21 @@ export default function SupplierPortal() {
       })
 
       setOtpSent(true)
-      alert(`OTP sent successfully to: ${email}`)
+      setCountdownSeconds(5)
+      setCountdownNotification(`OTP code has been successfully dispatched to ${email}!`)
+      const interval = setInterval(() => {
+        setCountdownSeconds((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval)
+            setCountdownNotification(null)
+            return 5
+          }
+          return prev - 1
+        })
+      }, 1000)
     } catch (err) {
       console.error(err)
-      alert('Failed to dispatch OTP. Please check SMTP parameters.')
+      showToast('Failed to dispatch OTP. Please check SMTP parameters.', 'error')
     } finally {
       setLoading(false)
     }
@@ -227,7 +296,7 @@ export default function SupplierPortal() {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     if (otp.length < 6) {
-      alert('Please enter a valid 6-digit OTP')
+      showToast('Please enter a valid 6-digit OTP', 'error')
       return
     }
 
@@ -235,7 +304,7 @@ export default function SupplierPortal() {
     try {
       const isValid = await verifyOTP(email, otp)
       if (!isValid) {
-        alert('Invalid or expired OTP. Please try again.')
+        showToast('Invalid or expired OTP. Please try again.', 'error')
         setLoading(false)
         return
       }
@@ -282,7 +351,7 @@ export default function SupplierPortal() {
       }
     } catch (err) {
       console.error(err)
-      alert('Error during verification. Please try again.')
+      showToast('Error during verification. Please try again.', 'error')
     } finally {
       setLoading(false)
     }
@@ -340,7 +409,7 @@ export default function SupplierPortal() {
         })
       }
     } catch (err) {
-      alert('Failed to update profile settings.')
+      showToast('Failed to update profile settings.', 'error')
     } finally {
       setLoading(false)
     }
@@ -351,7 +420,7 @@ export default function SupplierPortal() {
     e.preventDefault()
     if (!session) return
     if (!helpSubject || !helpMessage) {
-      alert('Please fill in both Subject and Message fields.')
+      showToast('Please fill in both Subject and Message fields.', 'error')
       return
     }
 
@@ -365,12 +434,12 @@ export default function SupplierPortal() {
         message: helpMessage
       })
 
-      alert('Your enquiry has been submitted. Operations desk will review and reply via email.')
+      showToast('Your enquiry has been submitted. Operations desk will review and reply via email.', 'success')
       setHelpSubject('')
       setHelpMessage('')
       loadDashboardData()
     } catch (err) {
-      alert('Failed to submit enquiry.')
+      showToast('Failed to submit enquiry.', 'error')
     } finally {
       setSubmittingHelp(false)
     }
@@ -392,21 +461,246 @@ export default function SupplierPortal() {
       setSelectedOrder(null)
       setVehicleNo('')
       setLrNo('')
-      alert('Order has been marked as Dispatched! Shipment info propagated to buyer dashboard.')
+      showToast('Order has been marked as Dispatched! Shipment info propagated to buyer dashboard.', 'success')
+
+      // Notify customer, admin, and supplier
+      try {
+        const recipient = selectedOrder.mobile || 'smehouse25@gmail.com'
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'order-status-update',
+            email: recipient,
+            orderDetails: {
+              orderId: selectedOrder.orderId,
+              companyName: selectedOrder.companyName,
+              status: 'Dispatched',
+              vehicleNo,
+              lrNo
+            }
+          })
+        })
+      } catch (err) {
+        console.warn('Failed to send status transition email:', err)
+      }
     }
+  }
+
+  const progressShipmentStatus = async (orderId: string, currentStatus: string) => {
+    let nextStatus: 'Placed' | 'Confirmed' | 'Dispatched' | 'Out for Dispatch' | 'Shipped' | 'Out for Delivery' | 'Delivered'
+    if (currentStatus === 'Dispatched') {
+      nextStatus = 'Out for Dispatch'
+    } else if (currentStatus === 'Out for Dispatch') {
+      nextStatus = 'Shipped'
+    } else if (currentStatus === 'Shipped') {
+      nextStatus = 'Out for Delivery'
+    } else if (currentStatus === 'Out for Delivery') {
+      nextStatus = 'Delivered'
+    } else {
+      return
+    }
+
+    const updated = await updateDbOrder(orderId, { status: nextStatus })
+    if (updated) {
+      setOrders(orders.map((o) => o.orderId === orderId ? { ...o, status: nextStatus } : o))
+      showToast(`Order ${orderId} status transitioned to: ${nextStatus}`, 'success')
+
+      // Send status update notification via SMTP
+      try {
+        const targetOrder = orders.find(o => o.orderId === orderId)
+        const recipient = targetOrder?.mobile || 'smehouse25@gmail.com'
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'order-status-update',
+            email: recipient,
+            orderDetails: {
+              orderId,
+              companyName: targetOrder?.companyName,
+              status: nextStatus,
+              vehicleNo: targetOrder?.dispatchDetails?.vehicleNo,
+              lrNo: targetOrder?.dispatchDetails?.lrNo
+            }
+          })
+        })
+      } catch (err) {
+        console.warn('Failed to send status transition email:', err)
+      }
+    }
+  }
+
+  const handleCreateProductRequest = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!session) return
+    setLoading(true)
+    try {
+      const details = {
+        name: pName,
+        category: pCategory,
+        rate: pRate,
+        unit: pUnit,
+        minOrder: pMinOrder,
+        marginRate: 0.04,
+        spec: pSpec,
+        cert: pCert || `QA-${pName.replace(/\s+/g, '-').toUpperCase()}-SPEC.pdf`,
+        inventory: pInventory,
+        supplierEmail: session.email,
+        supplierCompany: session.companyName,
+        type: 'new' as const
+      }
+      
+      await createPendingProduct(details)
+      
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'listing-request',
+          email: 'smehouse25@gmail.com',
+          productDetails: {
+            name: pName,
+            rate: pRate,
+            inventory: pInventory,
+            supplierCompany: session.companyName,
+            supplierEmail: session.email,
+            type: 'new'
+          }
+        })
+      })
+
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'listing-request',
+          email: session.email,
+          productDetails: {
+            name: pName,
+            rate: pRate,
+            inventory: pInventory,
+            supplierCompany: session.companyName,
+            supplierEmail: session.email,
+            type: 'new'
+          }
+        })
+      })
+
+      showToast('Material listing request submitted to Admin for verification.', 'success')
+      setShowListModal(false)
+      loadDashboardData()
+    } catch (err) {
+      showToast('Failed to submit listing request.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleEditProductRequest = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!session || !selectedProduct) return
+    setLoading(true)
+    try {
+      const details = {
+        id: selectedProduct.id,
+        name: pName,
+        category: pCategory,
+        rate: pRate,
+        unit: pUnit,
+        minOrder: pMinOrder,
+        marginRate: selectedProduct.marginRate || 0.04,
+        spec: pSpec,
+        cert: pCert || selectedProduct.cert,
+        inventory: pInventory,
+        supplierEmail: session.email,
+        supplierCompany: session.companyName,
+        type: 'edit' as const
+      }
+
+      await createPendingProduct(details)
+
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'listing-request',
+          email: 'smehouse25@gmail.com',
+          productDetails: {
+            name: pName,
+            rate: pRate,
+            inventory: pInventory,
+            supplierCompany: session.companyName,
+            supplierEmail: session.email,
+            type: 'edit'
+          }
+        })
+      })
+
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'listing-request',
+          email: session.email,
+          productDetails: {
+            name: pName,
+            rate: pRate,
+            inventory: pInventory,
+            supplierCompany: session.companyName,
+            supplierEmail: session.email,
+            type: 'edit'
+          }
+        })
+      })
+
+      showToast('Material price/inventory update request sent to Admin for vetting.', 'success')
+      setShowEditProductModal(false)
+      setSelectedProduct(null)
+      loadDashboardData()
+    } catch (err) {
+      showToast('Failed to submit product edit request.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const openListModal = () => {
+    setPName('')
+    setPCategory('Chemicals & Binders')
+    setPRate(0)
+    setPUnit('MT')
+    setPMinOrder(1)
+    setPSpec('')
+    setPInventory(0)
+    setPCert('')
+    setShowListModal(true)
+  }
+
+  const openEditProductModal = (p: any) => {
+    setSelectedProduct(p)
+    setPName(p.name)
+    setPCategory(p.category)
+    setPRate(p.rate)
+    setPUnit(p.unit)
+    setPMinOrder(p.minOrder)
+    setPSpec(p.spec)
+    setPInventory(p.inventory)
+    setPCert(p.cert)
+    setShowEditProductModal(true)
   }
 
   const handleUpdatePrice = async () => {
     const rateVal = parseInt(bitumenPrice)
     if (isNaN(rateVal)) {
-      alert('Please enter a valid price.')
+      showToast('Please enter a valid price.', 'error')
       return
     }
     const updated = await updateDbProduct('butamine-vg40', { rate: rateVal })
     if (updated) {
-      alert(`VG40 base price updated to ₹${rateVal}/MT inside Supabase. Changes are propagated to the marketplace!`)
+      showToast(`VG40 base price updated to ₹${rateVal}/MT inside Supabase. Changes are propagated to the marketplace!`, 'success')
     } else {
-      alert('Failed to update price in database.')
+      showToast('Failed to update price in database.', 'error')
     }
   }
 
@@ -443,6 +737,16 @@ export default function SupplierPortal() {
                   Verify Udyam credentials, coordinate logistics shipments, and check 45-day payment ledgers.
                 </p>
               </div>
+
+              {countdownNotification && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-2xl text-xs text-emerald-500 flex flex-col gap-1.5 animate-pulse mb-6">
+                  <div className="flex justify-between items-center">
+                    <span className="font-extrabold flex items-center gap-1">✉️ Mail Dispatched</span>
+                    <span className="bg-emerald-500 text-white font-bold px-2 py-0.5 rounded-lg text-[9px]">{countdownSeconds}s</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">{countdownNotification}</p>
+                </div>
+              )}
 
               {/* Login/Signup Tabs */}
               {!otpSent && (
@@ -634,13 +938,9 @@ export default function SupplierPortal() {
                 <p className="text-xs text-muted-foreground mt-0.5">Udyam: {session?.gstin} · Place: {session?.place}</p>
               </div>
               <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={openEditModal}
-                  className="text-xs font-bold border border-border bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl text-foreground flex items-center gap-1.5"
-                >
-                  <Edit2 className="h-3.5 w-3.5" /> Edit Profile
-                </button>
+                <span className="text-[10px] bg-muted/80 border border-border px-3.5 py-2 rounded-xl text-muted-foreground font-semibold">
+                  🔒 Edits Locked (Use Help Desk)
+                </span>
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -751,6 +1051,78 @@ export default function SupplierPortal() {
                   </div>
                 )}
 
+                {/* Logistics active shipments tracking list */}
+                <div className="border-t border-white/10 pt-6 space-y-4">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Logistics Tracker / Progress Shipments</h3>
+                  {orders.filter(o => ['Dispatched', 'Out for Dispatch', 'Shipped', 'Out for Delivery'].includes(o.status)).length === 0 ? (
+                    <p className="text-xs text-muted-foreground leading-normal">No active shipments in transit. Dispatch pending shipments to track logistics progression.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {orders
+                        .filter(o => ['Dispatched', 'Out for Dispatch', 'Shipped', 'Out for Delivery'].includes(o.status))
+                        .map((o) => (
+                          <div key={o.orderId} className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-sm space-y-4 backdrop-blur-md">
+                            <div className="flex justify-between items-center border-b border-border pb-3">
+                              <div>
+                                <span className="text-[10px] font-bold text-muted-foreground">LOGISTICS ID</span>
+                                <p className="font-bold text-sm text-foreground">{o.orderId}</p>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-muted-foreground">CURRENT STATUS</span>
+                                <span className="block mt-0.5 text-xs font-bold text-accent uppercase">{o.status}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-muted-foreground">CONSIGNMENT LR</span>
+                                <p className="text-xs font-semibold text-foreground">{(o as any).dispatchDetails?.lrNo || 'N/A'}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs gap-3">
+                              <span className="text-muted-foreground">Carrier Vehicle: <strong>{(o as any).dispatchDetails?.vehicleNo}</strong></span>
+                              
+                              {o.status === 'Dispatched' && (
+                                <button
+                                  type="button"
+                                  onClick={() => progressShipmentStatus(o.orderId, o.status)}
+                                  className="bg-blue-500 hover:bg-blue-600 text-white px-3.5 py-2 rounded-xl font-bold"
+                                >
+                                  Mark Out for Dispatch
+                                </button>
+                              )}
+                              {o.status === 'Out for Dispatch' && (
+                                <button
+                                  type="button"
+                                  onClick={() => progressShipmentStatus(o.orderId, o.status)}
+                                  className="bg-blue-500 hover:bg-blue-600 text-white px-3.5 py-2 rounded-xl font-bold animate-pulse"
+                                >
+                                  Mark as Shipped
+                                </button>
+                              )}
+                              {o.status === 'Shipped' && (
+                                <button
+                                  type="button"
+                                  onClick={() => progressShipmentStatus(o.orderId, o.status)}
+                                  className="bg-blue-500 hover:bg-blue-600 text-white px-3.5 py-2 rounded-xl font-bold"
+                                >
+                                  Mark Out for Delivery
+                                </button>
+                              )}
+                              {o.status === 'Out for Delivery' && (
+                                <button
+                                  type="button"
+                                  onClick={() => progressShipmentStatus(o.orderId, o.status)}
+                                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-3.5 py-2 rounded-xl font-bold"
+                                >
+                                  Mark as Delivered
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* HELP TICKETS LIST & BUILDER */}
                 <div className="mt-12 border-t border-white/10 pt-8 space-y-6">
                   <div className="flex items-center gap-2">
@@ -842,32 +1214,69 @@ export default function SupplierPortal() {
               <div className="space-y-6">
                 <h2 className="font-display text-xl font-bold text-foreground">Inventory & MSMED Payouts</h2>
 
-                {/* Price Adjustment Card */}
+                {/* Supplier Listings Control Card */}
                 <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-sm space-y-4 backdrop-blur-md">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Supplier Listings Control</h3>
-                  
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-semibold text-muted-foreground">Bitumen VG40 Bulk (₹/MT)</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        value={bitumenPrice}
-                        onChange={(e) => setBitumenPrice(e.target.value)}
-                        className="flex-1 h-10 border border-border px-3 rounded-xl text-sm font-bold outline-none focus:border-accent bg-background"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleUpdatePrice}
-                        className="bg-primary px-3 rounded-xl text-xs font-bold text-primary-foreground"
-                      >
-                        Update
-                      </button>
-                    </div>
+                  <div className="flex justify-between items-center border-b border-border pb-3">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Supplier Listings Control</h3>
+                    <button
+                      type="button"
+                      onClick={openListModal}
+                      className="bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg text-[10px] font-bold text-white flex items-center gap-1 hover:scale-105 transition-transform"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> List New Material
+                    </button>
                   </div>
 
-                  <div className="flex items-center gap-2 bg-muted p-3 rounded-xl text-xs text-muted-foreground">
-                    <Upload className="h-4.5 w-4.5 text-accent shrink-0" />
-                    <span>Upload new test reports (IS 73:2013)</span>
+                  {/* Active listings table */}
+                  <div className="space-y-3.5 max-h-[250px] overflow-y-auto pr-1">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Live Catalog Materials</h4>
+                    {productsList.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No catalog materials found.</p>
+                    ) : (
+                      productsList.map((p) => (
+                        <div key={p.id} className="bg-background/40 border border-border p-3 rounded-xl flex justify-between items-center text-xs">
+                          <div>
+                            <span className="font-bold text-foreground block">{p.name}</span>
+                            <span className="text-[10px] text-muted-foreground">Rate: ₹{p.rate.toLocaleString('en-IN')}/{p.unit} · MOQ: {p.minOrder} {p.unit}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openEditProductModal(p)}
+                            className="bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 px-2.5 py-1.5 rounded-lg text-blue-500 text-[10px] font-bold"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Pending requests queue */}
+                  <div className="space-y-3.5 border-t border-border pt-4 max-h-[250px] overflow-y-auto pr-1">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-amber-500">Submitted Approvals Queue</h4>
+                    {pendingListings.filter(l => l.supplierEmail === session?.email).length === 0 ? (
+                      <p className="text-[10px] text-muted-foreground">No pending listing approval requests.</p>
+                    ) : (
+                      pendingListings
+                        .filter(l => l.supplierEmail === session?.email)
+                        .map((l) => (
+                          <div key={l.tempId} className="bg-muted/50 border border-border p-3 rounded-xl text-xs space-y-1">
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-foreground">{l.name}</span>
+                              <span className={[
+                                'text-[8px] font-bold uppercase border px-2 py-0.5 rounded-md',
+                                l.status === 'pending' ? 'bg-amber-500/10 text-amber-500 border-amber-500/25 animate-pulse' :
+                                l.status === 'approved' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/25' :
+                                'bg-red-500/10 text-red-500 border-red-500/25'
+                              ].join(' ')}>{l.status}</span>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              <span className="block">Type: {l.type === 'new' ? 'New Material' : 'Update Parameters'}</span>
+                              <span className="block mt-0.5">Proposed Price: ₹{l.rate.toLocaleString('en-IN')}/{l.unit} · Inventory: {l.inventory} {l.unit}</span>
+                            </div>
+                          </div>
+                        ))
+                    )}
                   </div>
                 </div>
 
@@ -1060,6 +1469,242 @@ export default function SupplierPortal() {
               </button>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* List New Material Modal */}
+      {showListModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[99] flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-950 p-6 space-y-4 shadow-2xl relative">
+            <button 
+              type="button" 
+              onClick={() => setShowListModal(false)}
+              className="absolute right-4 top-4 p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div>
+              <h2 className="font-display text-lg font-bold text-foreground">List New Raw Material</h2>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Submit new material parameters to Admin vetting board.</p>
+            </div>
+
+            <form onSubmit={handleCreateProductRequest} className="space-y-3.5 text-xs">
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-muted-foreground">Material Name</label>
+                <input
+                  type="text"
+                  required
+                  value={pName}
+                  onChange={(e) => setPName(e.target.value)}
+                  placeholder="e.g. VG40 Bitumen Bulk"
+                  className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Category</label>
+                  <select
+                    value={pCategory}
+                    onChange={(e) => setPCategory(e.target.value)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  >
+                    <option value="Chemicals & Binders">Chemicals & Binders</option>
+                    <option value="Metals">Metals</option>
+                    <option value="Lubricants & Fluids">Lubricants & Fluids</option>
+                    <option value="Construction Metals">Construction Metals</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Price Rate (₹/Unit)</label>
+                  <input
+                    type="number"
+                    required
+                    value={pRate}
+                    onChange={(e) => setPRate(parseInt(e.target.value) || 0)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Fulfillment Unit</label>
+                  <input
+                    type="text"
+                    required
+                    value={pUnit}
+                    onChange={(e) => setPUnit(e.target.value)}
+                    placeholder="e.g. MT"
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Min Order Qty (MOQ)</label>
+                  <input
+                    type="number"
+                    required
+                    value={pMinOrder}
+                    onChange={(e) => setPMinOrder(parseInt(e.target.value) || 1)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Available Inventory</label>
+                  <input
+                    type="number"
+                    required
+                    value={pInventory}
+                    onChange={(e) => setPInventory(parseInt(e.target.value) || 0)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">QA Certificate (PDF)</label>
+                  <input
+                    type="text"
+                    value={pCert}
+                    onChange={(e) => setPCert(e.target.value)}
+                    placeholder="QA-COMPLIANCE.pdf"
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-muted-foreground">Material Specifications</label>
+                <textarea
+                  required
+                  value={pSpec}
+                  onChange={(e) => setPSpec(e.target.value)}
+                  placeholder="Viscosity Grade specifications conforming to IS 73:2013 standards..."
+                  rows={2}
+                  className="w-full border border-border p-2.5 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-11 bg-blue-500 text-white py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/15 transition-transform hover:-translate-y-0.5 mt-2"
+              >
+                {loading ? 'Submitting...' : 'Submit Listing for Approval'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Material Modal */}
+      {showEditProductModal && selectedProduct && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[99] flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-950 p-6 space-y-4 shadow-2xl relative">
+            <button 
+              type="button" 
+              onClick={() => setShowEditProductModal(false)}
+              className="absolute right-4 top-4 p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div>
+              <h2 className="font-display text-lg font-bold text-foreground">Edit Material Parameters</h2>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Submit price/inventory modifications to Admin vetting board.</p>
+            </div>
+
+            <form onSubmit={handleEditProductRequest} className="space-y-3.5 text-xs">
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-muted-foreground">Material Name</label>
+                <input
+                  type="text"
+                  required
+                  readOnly
+                  disabled
+                  value={pName}
+                  className="w-full h-10 border border-border px-3 rounded-lg bg-muted text-muted-foreground outline-none cursor-not-allowed select-none"
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Price Rate (₹/{pUnit})</label>
+                  <input
+                    type="number"
+                    required
+                    value={pRate}
+                    onChange={(e) => setPRate(parseInt(e.target.value) || 0)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Available Inventory</label>
+                  <input
+                    type="number"
+                    required
+                    value={pInventory}
+                    onChange={(e) => setPInventory(parseInt(e.target.value) || 0)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Fulfillment Unit</label>
+                  <input
+                    type="text"
+                    required
+                    readOnly
+                    disabled
+                    value={pUnit}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-muted text-muted-foreground outline-none cursor-not-allowed select-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Min Order Qty (MOQ)</label>
+                  <input
+                    type="number"
+                    required
+                    readOnly
+                    disabled
+                    value={pMinOrder}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-muted text-muted-foreground outline-none cursor-not-allowed select-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-muted-foreground">Material Specifications</label>
+                <textarea
+                  required
+                  value={pSpec}
+                  onChange={(e) => setPSpec(e.target.value)}
+                  placeholder="Material specs..."
+                  rows={2}
+                  className="w-full border border-border p-2.5 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-11 bg-blue-500 text-white py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/15 transition-transform hover:-translate-y-0.5 mt-2"
+              >
+                {loading ? 'Submitting...' : 'Submit Changes for Approval'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[999] bg-slate-900 border border-emerald-500/20 text-emerald-500 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-bounce">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+          <span className="text-xs font-bold font-sans tracking-wide">{toast.message}</span>
         </div>
       )}
 

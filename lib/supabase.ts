@@ -61,7 +61,7 @@ export interface Order {
     gst: number
     total: number
   }
-  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Delivered'
+  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Out for Dispatch' | 'Shipped' | 'Out for Delivery' | 'Delivered'
   date: string
   creditTerms: { interestRate: string; tenureDays: number; status: string } | null
   created_at?: string
@@ -775,6 +775,11 @@ export const getDbUsers = async (role?: 'customer' | 'supplier'): Promise<UserPr
 }
 
 export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'created_at'>): Promise<UserProfile> => {
+  const existing = await getUserProfileByEmail(profile.email)
+  if (existing) {
+    throw new Error(`Email ${profile.email} is already registered under the role: ${existing.role}`)
+  }
+
   const newUser: UserProfile = {
     ...profile,
     id: 'USR-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
@@ -823,6 +828,13 @@ export const getUserProfileByEmail = async (email: string): Promise<UserProfile 
 }
 
 export const updateUserProfile = async (id: string, updates: Partial<UserProfile>): Promise<UserProfile | null> => {
+  if (updates.email) {
+    const existing = await getUserProfileByEmail(updates.email)
+    if (existing && existing.id !== id) {
+      throw new Error(`Email ${updates.email} is already registered.`)
+    }
+  }
+
   try {
     const { data, error } = await supabaseClient
       .from('users_profiles')
@@ -850,18 +862,69 @@ export const updateUserProfile = async (id: string, updates: Partial<UserProfile
 }
 
 export const terminateUserProfile = async (id: string): Promise<boolean> => {
+  let emailToDelete: string | null = null
+
   try {
-    const { error } = await supabaseClient
+    const { data: userProfile } = await supabaseClient
+      .from('users_profiles')
+      .select('email')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (userProfile?.email) {
+      emailToDelete = userProfile.email
+    }
+
+    await supabaseClient
       .from('users_profiles')
       .delete()
       .eq('id', id)
 
-    if (!error) {
-      removeLocalUser(id)
-      return true
+    if (emailToDelete) {
+      await supabaseClient
+        .from('products')
+        .delete()
+        .eq('supplierEmail', emailToDelete)
+
+      await supabaseClient
+        .from('pending_products')
+        .delete()
+        .eq('supplierEmail', emailToDelete)
+
+      if (typeof window !== 'undefined') {
+        const currentProds = JSON.parse(localStorage.getItem('smebhawan_products') || '[]')
+        const filteredProds = currentProds.filter((p: any) => p.supplierEmail !== emailToDelete)
+        localStorage.setItem('smebhawan_products', JSON.stringify(filteredProds))
+
+        const currentPending = JSON.parse(localStorage.getItem('smebhawan_pending_products') || '[]')
+        const filteredPending = currentPending.filter((p: any) => p.supplierEmail !== emailToDelete)
+        localStorage.setItem('smebhawan_pending_products', JSON.stringify(filteredPending))
+        window.dispatchEvent(new Event('storage'))
+      }
     }
+
+    removeLocalUser(id)
+    return true
   } catch (err) {
     console.warn('Supabase profile deletion failed, deleting locally:', err)
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const currentUsers = JSON.parse(localStorage.getItem('smebhawan_users') || '[]')
+      const targetUser = currentUsers.find((u: any) => u.id === id)
+      if (targetUser && targetUser.email) {
+        const email = targetUser.email
+        const currentProds = JSON.parse(localStorage.getItem('smebhawan_products') || '[]')
+        const filteredProds = currentProds.filter((p: any) => p.supplierEmail !== email)
+        localStorage.setItem('smebhawan_products', JSON.stringify(filteredProds))
+
+        const currentPending = JSON.parse(localStorage.getItem('smebhawan_pending_products') || '[]')
+        const filteredPending = currentPending.filter((p: any) => p.supplierEmail !== email)
+        localStorage.setItem('smebhawan_pending_products', JSON.stringify(filteredPending))
+        window.dispatchEvent(new Event('storage'))
+      }
+    } catch (e) {}
   }
 
   removeLocalUser(id)
@@ -961,3 +1024,200 @@ export const verifyOTP = async (email: string, code: string): Promise<boolean> =
   }
   return false
 }
+
+// ============================================
+// 6. SUPPLIER MATERIAL LISTINGS & APPROVALS
+// ============================================
+
+export interface PendingProduct {
+  id?: string // if editing existing product
+  tempId: string
+  name: string
+  category: string
+  rate: number
+  unit: string
+  minOrder: number
+  marginRate: number
+  spec: string
+  cert: string
+  inventory: number
+  supplierEmail: string
+  supplierCompany: string
+  type: 'new' | 'edit'
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}
+
+export const getPendingProducts = async (): Promise<PendingProduct[]> => {
+  try {
+    const { data, error } = await supabaseClient
+      .from('pending_products')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    if (data) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('smebhawan_pending_products', JSON.stringify(data))
+      }
+      return data
+    }
+  } catch (err) {
+    console.warn('Supabase pending products fetch failed, using local cache:', err)
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      return JSON.parse(localStorage.getItem('smebhawan_pending_products') || '[]')
+    } catch (e) {
+      // ignore
+    }
+  }
+  return []
+}
+
+export const createPendingProduct = async (
+  pending: Omit<PendingProduct, 'tempId' | 'status' | 'created_at'>
+): Promise<PendingProduct> => {
+  const newPending: PendingProduct = {
+    ...pending,
+    tempId: 'PEND-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  }
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('pending_products')
+      .insert([newPending])
+      .select()
+
+    if (error) throw error
+    if (data && data[0]) {
+      triggerLocalPendingProductsUpdate(data[0])
+      return data[0]
+    }
+  } catch (err) {
+    console.warn('Supabase pending products insert failed, saving locally:', err)
+  }
+
+  triggerLocalPendingProductsUpdate(newPending)
+  return newPending
+}
+
+export const updatePendingProductStatus = async (
+  tempId: string,
+  status: 'approved' | 'rejected'
+): Promise<PendingProduct | null> => {
+  try {
+    const { data, error } = await supabaseClient
+      .from('pending_products')
+      .update({ status })
+      .eq('tempId', tempId)
+      .select()
+
+    if (error) throw error
+    if (data && data[0]) {
+      const pendingProduct = data[0]
+      triggerLocalPendingProductsUpdate(pendingProduct)
+
+      if (status === 'approved') {
+        if (pendingProduct.type === 'new') {
+          const newProdId = pendingProduct.id || 'prod-' + Math.random().toString(36).substring(2, 9)
+          const newProduct: Product = {
+            id: newProdId,
+            name: pendingProduct.name,
+            category: pendingProduct.category,
+            rate: pendingProduct.rate,
+            unit: pendingProduct.unit,
+            minOrder: pendingProduct.minOrder,
+            marginRate: pendingProduct.marginRate || 0.04,
+            spec: pendingProduct.spec,
+            cert: pendingProduct.cert,
+            inventory: pendingProduct.inventory,
+          }
+          await supabaseClient.from('products').insert([newProduct])
+          
+          if (typeof window !== 'undefined') {
+            const currentProds = JSON.parse(localStorage.getItem('smebhawan_products') || '[]')
+            localStorage.setItem('smebhawan_products', JSON.stringify([newProduct, ...currentProds]))
+            window.dispatchEvent(new Event('storage'))
+          }
+        } else if (pendingProduct.type === 'edit' && pendingProduct.id) {
+          const updates = {
+            rate: pendingProduct.rate,
+            inventory: pendingProduct.inventory,
+            spec: pendingProduct.spec,
+          }
+          await supabaseClient.from('products').update(updates).eq('id', pendingProduct.id)
+
+          if (typeof window !== 'undefined') {
+            const currentProds = JSON.parse(localStorage.getItem('smebhawan_products') || '[]')
+            const updatedProds = currentProds.map((p: any) => p.id === pendingProduct.id ? { ...p, ...updates } : p)
+            localStorage.setItem('smebhawan_products', JSON.stringify(updatedProds))
+            window.dispatchEvent(new Event('storage'))
+          }
+        }
+      }
+
+      return pendingProduct
+    }
+  } catch (err) {
+    console.warn('Supabase pending products status update failed, syncing locally:', err)
+  }
+
+  if (typeof window !== 'undefined') {
+    const current = JSON.parse(localStorage.getItem('smebhawan_pending_products') || '[]')
+    const updated = current.map((p: any) => (p.tempId === tempId ? { ...p, status } : p))
+    localStorage.setItem('smebhawan_pending_products', JSON.stringify(updated))
+    window.dispatchEvent(new Event('storage'))
+    
+    const pendingProduct = updated.find((p: any) => p.tempId === tempId) || null
+    if (pendingProduct && status === 'approved') {
+      if (pendingProduct.type === 'new') {
+        const newProdId = pendingProduct.id || 'prod-' + Math.random().toString(36).substring(2, 9)
+        const newProduct: Product = {
+          id: newProdId,
+          name: pendingProduct.name,
+          category: pendingProduct.category,
+          rate: pendingProduct.rate,
+          unit: pendingProduct.unit,
+          minOrder: pendingProduct.minOrder,
+          marginRate: pendingProduct.marginRate || 0.04,
+          spec: pendingProduct.spec,
+          cert: pendingProduct.cert,
+          inventory: pendingProduct.inventory,
+        }
+        const currentProds = JSON.parse(localStorage.getItem('smebhawan_products') || '[]')
+        localStorage.setItem('smebhawan_products', JSON.stringify([newProduct, ...currentProds]))
+        window.dispatchEvent(new Event('storage'))
+      } else if (pendingProduct.type === 'edit' && pendingProduct.id) {
+        const updates = {
+          rate: pendingProduct.rate,
+          inventory: pendingProduct.inventory,
+          spec: pendingProduct.spec,
+        }
+        const currentProds = JSON.parse(localStorage.getItem('smebhawan_products') || '[]')
+        const updatedProds = currentProds.map((p: any) => p.id === pendingProduct.id ? { ...p, ...updates } : p)
+        localStorage.setItem('smebhawan_products', JSON.stringify(updatedProds))
+        window.dispatchEvent(new Event('storage'))
+      }
+    }
+
+    return pendingProduct
+  }
+  return null
+}
+
+const triggerLocalPendingProductsUpdate = (p: PendingProduct) => {
+  if (typeof window !== 'undefined') {
+    const current = JSON.parse(localStorage.getItem('smebhawan_pending_products') || '[]')
+    const exists = current.some((x: any) => x.tempId === p.tempId)
+    const updated = exists
+      ? current.map((x: any) => (x.tempId === p.tempId ? p : x))
+      : [p, ...current]
+    localStorage.setItem('smebhawan_pending_products', JSON.stringify(updated))
+    window.dispatchEvent(new Event('storage'))
+  }
+}
+

@@ -1,7 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getDbProducts, placeDbOrder } from '@/lib/supabase'
+import {
+  getDbProducts,
+  placeDbOrder,
+  createOTP,
+  verifyOTP,
+  getUserProfileByEmail,
+  createUserProfile
+} from '@/lib/supabase'
 import {
   Search,
   ChevronDown,
@@ -196,6 +203,29 @@ export function MarketplaceExchange() {
   const [mobile, setMobile] = useState('')
   const [orderSuccessId, setOrderSuccessId] = useState('')
 
+  // Inline Authentication & Payment States
+  const [session, setSession] = useState<any>(null)
+  const [authEmail, setAuthEmail] = useState('')
+  const [authName, setAuthName] = useState('')
+  const [authPhone, setAuthPhone] = useState('')
+  const [authCompany, setAuthCompany] = useState('')
+  const [authGstin, setAuthGstin] = useState('')
+  const [authPlace, setAuthPlace] = useState('')
+  const [authOtp, setAuthOtp] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [isSignUpMode, setIsSignUpMode] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<'Cash on Delivery' | 'Online Payment' | 'Embedded MSME Credit'>('Cash on Delivery')
+  const [countdownNotification, setCountdownNotification] = useState<string | null>(null)
+  const [countdownSeconds, setCountdownSeconds] = useState(5)
+
+  // Floating Toast Alert State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
+
   // Load products list from Supabase
   const loadProducts = async () => {
     const list = await getDbProducts()
@@ -204,8 +234,48 @@ export function MarketplaceExchange() {
 
   useEffect(() => {
     loadProducts()
-    window.addEventListener('storage', loadProducts)
-    return () => window.removeEventListener('storage', loadProducts)
+    
+    if (typeof window !== 'undefined') {
+      const activeSession = localStorage.getItem('smebhawan_user_session')
+      if (activeSession) {
+        try {
+          const parsed = JSON.parse(activeSession)
+          if (parsed.role === 'customer') {
+            setSession(parsed)
+            setCompanyName(parsed.companyName)
+            setGstin(parsed.gstin)
+            setMobile(parsed.phone)
+            setAddress(parsed.place)
+          }
+        } catch (e) {}
+      }
+    }
+
+    const handleStorageChange = () => {
+      loadProducts()
+      const activeSession = localStorage.getItem('smebhawan_user_session')
+      if (activeSession) {
+        try {
+          const parsed = JSON.parse(activeSession)
+          if (parsed.role === 'customer') {
+            setSession(parsed)
+            setCompanyName(parsed.companyName)
+            setGstin(parsed.gstin)
+            setMobile(parsed.phone)
+            setAddress(parsed.place)
+          } else {
+            setSession(null)
+          }
+        } catch (e) {
+          setSession(null)
+        }
+      } else {
+        setSession(null)
+      }
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
   }, [])
 
   // Filter products
@@ -294,14 +364,144 @@ export function MarketplaceExchange() {
     { baseCost: 0, margin: 0, logistics: 0, interest: 0, gst: 0, total: 0 }
   )
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!authEmail || !authEmail.includes('@')) {
+      showToast('Please enter a valid email address', 'error')
+      return
+    }
+    setAuthLoading(true)
+    try {
+      if (!isSignUpMode) {
+        const user = await getUserProfileByEmail(authEmail)
+        if (!user || user.role !== 'customer') {
+          showToast('This email address is not registered as a Customer. Please switch to Register / Sign Up.', 'error')
+          setAuthLoading(false)
+          return
+        }
+      } else {
+        const existing = await getUserProfileByEmail(authEmail)
+        if (existing) {
+          if (existing.role === 'supplier') {
+            showToast('This email is already registered as a Supplier and cannot be used for a Customer account.', 'error')
+            setAuthLoading(false)
+            return
+          } else {
+            showToast('This email is already registered as a Customer. Please switch to Sign In mode.', 'info')
+            setAuthLoading(false)
+            return
+          }
+        }
+      }
+
+      const generatedCode = Math.floor(100000 + Math.random() * 900000).toString()
+      await createOTP(authEmail, generatedCode)
+
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send-otp',
+          email: authEmail,
+          code: generatedCode
+        })
+      })
+
+      setOtpSent(true)
+      setCountdownSeconds(5)
+      setCountdownNotification(`OTP code has been successfully dispatched to ${authEmail}!`)
+      const interval = setInterval(() => {
+        setCountdownSeconds((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval)
+            setCountdownNotification(null)
+            return 5
+          }
+          return prev - 1
+        })
+      }, 1000)
+    } catch (err) {
+      console.error(err)
+      showToast('Failed to dispatch OTP. Please check your network or SMTP credentials.', 'error')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (authOtp.length < 6) {
+      showToast('Please enter a valid 6-digit OTP', 'error')
+      return
+    }
+    setAuthLoading(true)
+    try {
+      const isValid = await verifyOTP(authEmail, authOtp)
+      if (!isValid) {
+        showToast('Invalid or expired OTP. Please try again.', 'error')
+        setAuthLoading(false)
+        return
+      }
+
+      if (isSignUpMode) {
+        const newProfile = await createUserProfile({
+          name: authName,
+          place: authPlace,
+          email: authEmail.trim().toLowerCase(),
+          phone: authPhone,
+          companyName: authCompany,
+          gstin: authGstin,
+          role: 'customer',
+          status: 'verified'
+        })
+
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'signup-success',
+            email: authEmail,
+            name: authName,
+            role: 'Customer Portal'
+          })
+        })
+
+        localStorage.setItem('smebhawan_user_session', JSON.stringify(newProfile))
+        setSession(newProfile)
+        setCompanyName(newProfile.companyName)
+        setGstin(newProfile.gstin)
+        setMobile(newProfile.phone)
+        setAddress(newProfile.place)
+      } else {
+        const existingProfile = await getUserProfileByEmail(authEmail)
+        if (existingProfile) {
+          localStorage.setItem('smebhawan_user_session', JSON.stringify(existingProfile))
+          setSession(existingProfile)
+          setCompanyName(existingProfile.companyName)
+          setGstin(existingProfile.gstin)
+          setMobile(existingProfile.phone)
+          setAddress(existingProfile.place)
+        }
+      }
+      showToast('Authenticated successfully!', 'success')
+      window.dispatchEvent(new Event('storage'))
+    } catch (err) {
+      console.error(err)
+      showToast('Error during authorization. Please check OTP code.', 'error')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!companyName || !gstin || !address || !mobile) {
-      alert('Please fill out all billing & GST details.')
+      showToast('Please fill out all billing & GST details.', 'error')
       return
     }
 
     const orderId = 'SB-' + Math.floor(100000 + Math.random() * 900000)
+    const isCredit = paymentMethod === 'Embedded MSME Credit'
     const newOrder = {
       orderId,
       companyName,
@@ -313,19 +513,19 @@ export function MarketplaceExchange() {
         productName: item.product.name,
         qty: item.qty,
         rate: item.product.rate,
-        costs: calculateCosts(item.product, item.qty, item.logistics, item.payment),
+        costs: calculateCosts(item.product, item.qty, item.logistics, isCredit ? 'credit' : 'upfront'),
         logistics: item.logistics,
-        payment: item.payment,
+        payment: isCredit ? ('credit' as const) : ('upfront' as const),
       })),
       totals: cartTotals,
-      status: 'Placed',
+      status: 'Placed' as const,
       date: new Date().toISOString(),
-      creditTerms: cart.some((i) => i.payment === 'credit')
+      creditTerms: isCredit
         ? { interestRate: '16%', tenureDays: 60, status: 'Pending Approval' }
         : null,
     }
 
-    placeDbOrder(newOrder as any)
+    await placeDbOrder(newOrder as any)
 
     const metrics = JSON.parse(localStorage.getItem('smebhawan_metrics') || '{"aum": 28500000, "margins": 1140000, "defaultRate": 0.8}')
     if (newOrder.creditTerms) {
@@ -333,6 +533,46 @@ export function MarketplaceExchange() {
     }
     metrics.margins += cartTotals.margin
     localStorage.setItem('smebhawan_metrics', JSON.stringify(metrics))
+
+    // Send email notifications
+    try {
+      const emailRecipient = session?.email || authEmail
+      // Customer alert
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'order-placed',
+          email: emailRecipient,
+          orderDetails: {
+            orderId,
+            companyName,
+            totalValue: cartTotals.total,
+            paymentMethod,
+            status: 'waiting for approval'
+          }
+        })
+      })
+
+      // Admin duplicate alert
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'order-placed',
+          email: 'smehouse25@gmail.com',
+          orderDetails: {
+            orderId,
+            companyName,
+            totalValue: cartTotals.total,
+            paymentMethod,
+            status: 'waiting for approval'
+          }
+        })
+      })
+    } catch (err) {
+      console.warn('Failed to send SMTP order notification:', err)
+    }
 
     setCart([])
     setOrderSuccessId(orderId)
@@ -753,19 +993,184 @@ export function MarketplaceExchange() {
                 </>
               )}
 
-              {checkoutStep === 1 && (
-                <form onSubmit={handlePlaceOrder} className="space-y-4">
+              {checkoutStep === 1 && !session && (
+                <div className="space-y-6 text-xs">
+                  {countdownNotification && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-2xl text-xs text-emerald-500 flex flex-col gap-1.5 animate-pulse">
+                      <div className="flex justify-between items-center">
+                        <span className="font-extrabold flex items-center gap-1">✉️ Mail Dispatched</span>
+                        <span className="bg-emerald-500 text-white font-bold px-2 py-0.5 rounded-lg text-[9px]">{countdownSeconds}s</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">{countdownNotification}</p>
+                    </div>
+                  )}
+                  <div className="text-center bg-accent/5 border border-accent/20 p-4 rounded-2xl">
+                    <p className="text-sm font-extrabold text-foreground">Secure B2B Authorization Required</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">To execute raw material contracts, please verify your customer profile.</p>
+                  </div>
+
+                  <div className="flex border-b border-border text-center font-bold tracking-wider uppercase mb-4">
+                    <button
+                      type="button"
+                      onClick={() => { setIsSignUpMode(false); setOtpSent(false); }}
+                      className={`flex-1 pb-2 border-b-2 transition-colors ${!isSignUpMode ? 'border-accent text-accent' : 'border-transparent text-muted-foreground'}`}
+                    >
+                      Sign In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setIsSignUpMode(true); setOtpSent(false); }}
+                      className={`flex-1 pb-2 border-b-2 transition-colors ${isSignUpMode ? 'border-accent text-accent' : 'border-transparent text-muted-foreground'}`}
+                    >
+                      Register / Sign Up
+                    </button>
+                  </div>
+
+                  {!otpSent ? (
+                    <form onSubmit={handleSendOtp} className="space-y-3.5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="font-semibold text-muted-foreground">Business Email Address *</label>
+                        <input
+                          type="email"
+                          required
+                          value={authEmail}
+                          onChange={(e) => setAuthEmail(e.target.value)}
+                          placeholder="e.g. procurement@company.com"
+                          className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                        />
+                      </div>
+
+                      {isSignUpMode && (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="flex flex-col gap-1">
+                              <label className="font-semibold text-muted-foreground">Authorized Name *</label>
+                              <input
+                                type="text"
+                                required
+                                value={authName}
+                                onChange={(e) => setAuthName(e.target.value)}
+                                placeholder="Your Name"
+                                className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="font-semibold text-muted-foreground">Contact Phone *</label>
+                              <input
+                                type="tel"
+                                required
+                                value={authPhone}
+                                onChange={(e) => setAuthPhone(e.target.value)}
+                                placeholder="+91 "
+                                className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="flex flex-col gap-1">
+                              <label className="font-semibold text-muted-foreground">Company Name *</label>
+                              <input
+                                type="text"
+                                required
+                                value={authCompany}
+                                onChange={(e) => setAuthCompany(e.target.value)}
+                                placeholder="Acme Ltd"
+                                className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="font-semibold text-muted-foreground">Business GSTIN *</label>
+                              <input
+                                type="text"
+                                required
+                                value={authGstin}
+                                onChange={(e) => setAuthGstin(e.target.value)}
+                                placeholder="GSTIN Code"
+                                className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent uppercase"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="font-semibold text-muted-foreground">Warehouse / Delivery City *</label>
+                            <input
+                              type="text"
+                              required
+                              value={authPlace}
+                              onChange={(e) => setAuthPlace(e.target.value)}
+                              placeholder="City, State"
+                              className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={authLoading}
+                        className="w-full h-11 bg-primary text-primary-foreground font-bold rounded-xl flex items-center justify-center gap-1.5 transition-transform hover:-translate-y-0.5 mt-2"
+                      >
+                        {authLoading ? 'Sending OTP...' : 'Request Email Verification OTP'} <ArrowRight className="h-4 w-4" />
+                      </button>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleVerifyOtp} className="space-y-4">
+                      <div className="bg-accent/10 border border-accent/20 p-3.5 rounded-xl text-[10px] text-accent leading-normal flex items-start gap-2">
+                        <BadgeAlert className="h-4 w-4 mt-0.5 shrink-0" />
+                        <span>OTP security code sent to <strong>{authEmail}</strong>. Check your inbox and type it below.</span>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label className="font-semibold text-muted-foreground text-center">Enter 6-Digit OTP Code</label>
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          value={authOtp}
+                          onChange={(e) => setAuthOtp(e.target.value)}
+                          placeholder="XXXXXX"
+                          className="w-full h-10 border border-border px-3 rounded-lg text-center font-bold tracking-[0.2em] outline-none focus:border-accent bg-background text-foreground"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={authLoading}
+                        className="w-full h-11 bg-accent text-accent-foreground font-bold rounded-xl flex items-center justify-center gap-1.5 transition-transform hover:-translate-y-0.5"
+                      >
+                        {authLoading ? 'Verifying...' : 'Verify & Authorize Sourcing'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setOtpSent(false)}
+                        className="w-full text-center text-xs text-muted-foreground hover:underline"
+                      >
+                        Change Email
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {checkoutStep === 1 && session && (
+                <form onSubmit={handlePlaceOrder} className="space-y-4 text-xs">
                   <div className="flex items-center justify-between bg-accent/10 border border-accent/20 p-3.5 rounded-2xl">
                     <div>
-                      <p className="text-xs font-bold text-accent">B2B Quick Simulation</p>
-                      <p className="text-[10px] text-accent/80">Auto-fill mock company credentials for test clearing.</p>
+                      <p className="text-xs font-bold text-accent">Authorized Buyer Profile</p>
+                      <p className="text-[10px] text-muted-foreground">Logged in as: <strong className="text-foreground">{session.email}</strong></p>
                     </div>
                     <button
                       type="button"
-                      onClick={autoFillBuyer}
-                      className="bg-accent px-3 py-1.5 rounded-lg text-xs font-bold text-accent-foreground"
+                      onClick={() => {
+                        localStorage.removeItem('smebhawan_user_session');
+                        setSession(null);
+                        window.dispatchEvent(new Event('storage'));
+                      }}
+                      className="border border-border px-3 py-1.5 rounded-lg text-xs font-bold text-muted-foreground hover:text-foreground"
                     >
-                      Auto-fill
+                      Log Out
                     </button>
                   </div>
 
@@ -814,13 +1219,43 @@ export function MarketplaceExchange() {
                     />
                   </div>
 
-                  {cartTotals.interest > 0 && (
+                  {/* Payment Selection Selector */}
+                  <div className="flex flex-col gap-1.5 border-t border-border pt-4">
+                    <label className="text-xs font-bold text-foreground">Select Payment Settlement Option</label>
+                    <div className="space-y-2 mt-1">
+                      {[
+                        { key: 'Cash on Delivery', title: 'Cash on Delivery (COD)', desc: 'Pay at warehouse during shipment clearance.' },
+                        { key: 'Online Payment', title: 'Pay Online (Instant Spot)', desc: 'Clear contract using simulated B2B Netbanking/UPI.' },
+                        { key: 'Embedded MSME Credit', title: 'Embedded MSME Credit Line', desc: 'Accrue on 16% p.a. line with 60 days repayment window.' }
+                      ].map((item) => (
+                        <label
+                          key={item.key}
+                          onClick={() => setPaymentMethod(item.key as any)}
+                          className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === item.key ? 'border-accent bg-accent/5 font-semibold text-foreground' : 'border-border bg-background hover:bg-muted text-muted-foreground'}`}
+                        >
+                          <input
+                            type="radio"
+                            name="paymentOption"
+                            checked={paymentMethod === item.key}
+                            onChange={() => {}}
+                            className="mt-1 accent-accent"
+                          />
+                          <div>
+                            <span className="block text-xs font-bold">{item.title}</span>
+                            <span className="block text-[10px] text-muted-foreground/90 mt-0.5">{item.desc}</span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {paymentMethod === 'Embedded MSME Credit' && (
                     <div className="flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl">
                       <BadgeAlert className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
                       <div>
                         <p className="text-xs font-bold text-amber-500">Embedded Credit Term Agreement</p>
                         <p className="text-[10px] text-muted-foreground mt-0.5 leading-normal">
-                          By placing this order, you apply for 16% annualized credit. Approval requires KYC validation by smebhawan credit officers inside the Operations Console.
+                          By placing this order, you apply for 16% annualized credit. Approval requires KYC validation by credit officers inside the Operations Console.
                         </p>
                       </div>
                     </div>
@@ -889,19 +1324,31 @@ export function MarketplaceExchange() {
                     >
                       Back to Review
                     </button>
-                    <button
-                      type="button"
-                      onClick={handlePlaceOrder}
-                      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-accent py-3 text-xs font-bold text-accent-foreground shadow-lg shadow-accent/15"
-                    >
-                      Confirm order <CheckCircle className="h-4 w-4" />
-                    </button>
+                    {session ? (
+                      <button
+                        type="button"
+                        onClick={handlePlaceOrder}
+                        className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-accent py-3 text-xs font-bold text-accent-foreground shadow-lg shadow-accent/15"
+                      >
+                        Confirm order <CheckCircle className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <span className="w-full text-center text-xs text-muted-foreground py-3 bg-muted rounded-xl select-none font-bold">
+                        Authenticate Above
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
             )}
 
           </div>
+        </div>
+      )}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[999] bg-slate-900 border border-emerald-500/20 text-emerald-500 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-bounce">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+          <span className="text-xs font-bold font-sans tracking-wide">{toast.message}</span>
         </div>
       )}
     </div>

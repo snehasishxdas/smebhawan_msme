@@ -24,9 +24,10 @@ import {
   Trash2,
   PlusCircle,
   Mail,
-  Send
+  Send,
+  X
 } from 'lucide-react'
-import { getTeamMembers, addTeamMember, deleteTeamMember, type TeamMember, getDbOrders, updateDbOrder, getDbProducts, updateDbProduct, updateTeamMember, getDbDoubts, replyDbDoubt, type Doubt, getDbUsers, updateUserProfile, terminateUserProfile, type UserProfile } from '@/lib/supabase'
+import { getTeamMembers, addTeamMember, deleteTeamMember, type TeamMember, getDbOrders, updateDbOrder, getDbProducts, updateDbProduct, updateTeamMember, getDbDoubts, replyDbDoubt, type Doubt, getDbUsers, updateUserProfile, terminateUserProfile, type UserProfile, getPendingProducts, updatePendingProductStatus, type PendingProduct, getUserProfileByEmail, createOTP, verifyOTP } from '@/lib/supabase'
 
 function LinkedinIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -94,9 +95,10 @@ interface Order {
     gst: number
     total: number
   }
-  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Delivered'
+  status: 'Placed' | 'Confirmed' | 'Dispatched' | 'Out for Dispatch' | 'Shipped' | 'Out for Delivery' | 'Delivered'
   date: string
   creditTerms: { interestRate: string; tenureDays: number; status: string } | null
+  dispatchDetails?: { vehicleNo: string; lrNo: string; dispatchedAt: string } | null
 }
 
 export default function AdminPortal() {
@@ -138,6 +140,9 @@ export default function AdminPortal() {
   const [editingRate, setEditingRate] = useState<{ [id: string]: number }>({})
   const [editingInv, setEditingInv] = useState<{ [id: string]: number }>({})
 
+  // Supplier material listing approvals state
+  const [pendingProducts, setPendingProducts] = useState<PendingProduct[]>([])
+
   // Doubts management state
   const [doubts, setDoubts] = useState<Doubt[]>([])
   const [replyInputs, setReplyInputs] = useState<{ [id: string]: string }>({})
@@ -146,6 +151,27 @@ export default function AdminPortal() {
   // User directories state
   const [usersList, setUsersList] = useState<UserProfile[]>([])
   const [directoryTab, setDirectoryTab] = useState<'customers' | 'suppliers' | 'vetting'>('customers')
+
+  // Admin Supplier Editing state
+  const [editingSupplier, setEditingSupplier] = useState<UserProfile | null>(null)
+  const [editSuppName, setEditSuppName] = useState('')
+  const [editSuppCompany, setEditSuppCompany] = useState('')
+  const [editSuppPlace, setEditSuppPlace] = useState('')
+  const [editSuppPhone, setEditSuppPhone] = useState('')
+  const [editSuppEmail, setEditSuppEmail] = useState('')
+  const [editSuppGstin, setEditSuppGstin] = useState('')
+  const [editSuppOtp, setEditSuppOtp] = useState('')
+  const [editSuppOtpSent, setEditSuppOtpSent] = useState(false)
+  const [editSuppGeneratedCode, setEditSuppGeneratedCode] = useState('')
+  const [countdownNotification, setCountdownNotification] = useState<string | null>(null)
+  const [countdownSeconds, setCountdownSeconds] = useState(5)
+
+  // Floating Toast Alert State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
 
   // Load orders & metrics
   const loadState = async () => {
@@ -187,12 +213,18 @@ export default function AdminPortal() {
     setUsersList(list)
   }
 
+  const loadPendingProducts = async () => {
+    const list = await getPendingProducts()
+    setPendingProducts(list)
+  }
+
   useEffect(() => {
     loadState()
     loadTeam()
     loadProducts()
     loadDoubts()
     loadUsers()
+    loadPendingProducts()
     
     const syncAll = () => {
       loadState()
@@ -200,6 +232,7 @@ export default function AdminPortal() {
       loadProducts()
       loadDoubts()
       loadUsers()
+      loadPendingProducts()
     }
     
     window.addEventListener('storage', syncAll)
@@ -209,7 +242,7 @@ export default function AdminPortal() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
     if (username !== 'smehouse25@gmail.com' || password !== 'houseofsme@25') {
-      alert('Invalid admin credentials. Please use the registered email and password.')
+      showToast('Invalid admin credentials. Please use the registered email and password.', 'error')
       return
     }
     setLoading(true)
@@ -219,15 +252,6 @@ export default function AdminPortal() {
     }, 600)
   }
 
-  const bypassLogin = () => {
-    setUsername('smehouse25@gmail.com')
-    setPassword('houseofsme@25')
-    setLoading(true)
-    setTimeout(() => {
-      setIsLoggedIn(true)
-      setLoading(false)
-    }, 400)
-  }
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -342,16 +366,16 @@ export default function AdminPortal() {
       if (updated) {
         setDoubts(doubts.map((d) => d.id === id ? updated : d))
         setReplyInputs((prev) => ({ ...prev, [id]: '' }))
-        alert(apiRes.simulated 
+        showToast(apiRes.simulated 
           ? 'Reply saved to database successfully! (SMTP simulation logged in dev console)' 
-          : 'Reply sent via SMTP email and saved to database successfully!'
+          : 'Reply sent via SMTP email and saved to database successfully!', 'success'
         )
       } else {
-        alert('Failed to save reply status to the database.')
+        showToast('Failed to save reply status to the database.', 'error')
       }
     } catch (err: any) {
       console.error(err)
-      alert(`Error sending reply: ${err.message || err}`)
+      showToast(`Error sending reply: ${err.message || err}`, 'error')
     } finally {
       setSendingReplies((prev) => ({ ...prev, [id]: false }))
     }
@@ -362,11 +386,11 @@ export default function AdminPortal() {
       if (outcome === 'verified') {
         const updated = await updateUserProfile(id, { status: 'verified' })
         if (updated) {
-          alert('Supplier verification approved! Notification email sent via SMTP.')
+          showToast('Supplier verification approved! Notification email sent via SMTP.', 'success')
         }
       } else {
         await terminateUserProfile(id)
-        alert('Supplier registration rejected & profile removed.')
+        showToast('Supplier registration rejected & profile removed.', 'info')
       }
 
       await fetch('/api/send-email', {
@@ -382,7 +406,98 @@ export default function AdminPortal() {
       loadUsers()
     } catch (err) {
       console.error(err)
-      alert('Error vetting supplier.')
+      showToast('Error terminating user profile registry.', 'error')
+    }
+  }
+
+  const openEditSupplierModal = (supp: UserProfile) => {
+    setEditingSupplier(supp)
+    setEditSuppName(supp.name)
+    setEditSuppCompany(supp.companyName)
+    setEditSuppPlace(supp.place)
+    setEditSuppPhone(supp.phone)
+    setEditSuppEmail(supp.email)
+    setEditSuppGstin(supp.gstin || '')
+    setEditSuppOtp('')
+    setEditSuppOtpSent(false)
+    setCountdownNotification(null)
+  }
+
+  const handleSaveSupplier = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingSupplier) return
+    setLoading(true)
+    try {
+      const isEmailChanged = editSuppEmail.trim().toLowerCase() !== editingSupplier.email.trim().toLowerCase()
+
+      if (isEmailChanged && !editSuppOtpSent) {
+        const existing = await getUserProfileByEmail(editSuppEmail)
+        if (existing) {
+          alert('This email is already registered to another account.')
+          setLoading(false)
+          return
+        }
+
+        const code = Math.floor(100000 + Math.random() * 900000).toString()
+        setEditSuppGeneratedCode(code)
+        await createOTP(editSuppEmail, code)
+
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'send-otp',
+            email: editSuppEmail,
+            code: code
+          })
+        })
+
+        setEditSuppOtpSent(true)
+        setCountdownSeconds(5)
+        setCountdownNotification(`Verification OTP sent to new address: ${editSuppEmail}`)
+        const interval = setInterval(() => {
+          setCountdownSeconds((prev) => {
+            if (prev <= 1) {
+              clearInterval(interval)
+              setCountdownNotification(null)
+              return 5
+            }
+            return prev - 1
+          })
+        }, 1000)
+
+        setLoading(false)
+        return
+      }
+
+      if (isEmailChanged && editSuppOtpSent) {
+        const isValid = await verifyOTP(editSuppEmail, editSuppOtp)
+        if (!isValid) {
+          alert('Invalid or expired OTP. Please try again.')
+          setLoading(false)
+          return
+        }
+      }
+
+      const updates = {
+        name: editSuppName,
+        companyName: editSuppCompany,
+        place: editSuppPlace,
+        phone: editSuppPhone,
+        gstin: editSuppGstin,
+        email: editSuppEmail.trim().toLowerCase()
+      }
+      const updated = await updateUserProfile(editingSupplier.id, updates)
+      if (updated) {
+        setEditingSupplier(null)
+        setEditSuppOtpSent(false)
+        alert('Supplier details updated successfully!')
+        loadUsers()
+      }
+    } catch (err) {
+      alert('Failed to update supplier profile.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -393,7 +508,7 @@ export default function AdminPortal() {
 
     try {
       await terminateUserProfile(id)
-      alert('Account terminated successfully and deleted from database.')
+      showToast('Account terminated successfully and deleted from database.', 'success')
 
       await fetch('/api/send-email', {
         method: 'POST',
@@ -407,7 +522,7 @@ export default function AdminPortal() {
       loadUsers()
     } catch (err) {
       console.error(err)
-      alert('Failed to terminate user profile.')
+      showToast('Failed to terminate user profile.', 'error')
     }
   }
 
@@ -422,7 +537,7 @@ export default function AdminPortal() {
     const updated = await updateDbOrder(orderId, updates)
     if (updated) {
       setOrders(orders.map((o) => o.orderId === orderId ? { ...o, ...updates } : o))
-      alert('Credit underwriting cleared. Contract status set to "Confirmed" and routed to Supplier allocations.')
+      showToast('Credit underwriting cleared. Contract status set to "Confirmed" and routed to Supplier allocations.', 'success')
     }
   }
 
@@ -436,7 +551,7 @@ export default function AdminPortal() {
     const updated = await updateDbOrder(orderId, updates)
     if (updated) {
       setOrders(orders.map((o) => o.orderId === orderId ? { ...o, ...updates } : o))
-      alert('Credit application declined.')
+      showToast('Credit application declined.', 'info')
     }
   }
 
@@ -448,13 +563,44 @@ export default function AdminPortal() {
     const updated = await updateDbOrder(orderId, updates)
     if (updated) {
       setOrders(orders.map((o) => o.orderId === orderId ? { ...o, ...updates } : o))
-      alert('Delivery cleared. MSMED 45-day payment countdown timer initiated.')
+      showToast('Delivery cleared. MSMED 45-day payment countdown timer initiated.', 'success')
+    }
+  }
+
+  const handlePendingProductDecision = async (tempId: string, decision: 'approved' | 'rejected') => {
+    try {
+      const details = await updatePendingProductStatus(tempId, decision)
+      if (details) {
+        showToast(`Supplier listing proposal successfully ${decision}!`, 'success')
+        
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'listing-status-update',
+            email: details.supplierEmail,
+            productDetails: {
+              name: details.name,
+              rate: details.rate,
+              status: decision
+            }
+          })
+        })
+
+        loadPendingProducts()
+        loadProducts()
+      } else {
+        showToast('Could not update listing request status.', 'error')
+      }
+    } catch (err) {
+      console.error(err)
+      showToast('Vetting decision propagation failed.', 'error')
     }
   }
 
   // Split calculations
   const pendingCreditApprovals = orders.filter(
-    (o) => o.status === 'Placed' && o.creditTerms && o.creditTerms.status === 'Pending Approval'
+    (o) => o.status === 'Placed'
   )
 
   return (
@@ -487,7 +633,7 @@ export default function AdminPortal() {
                     required
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="smehouse25@gmail.com"
+                    placeholder="Enter admin email address"
                     className="w-full h-11 border border-border px-3 rounded-xl text-sm outline-none focus:border-accent bg-background"
                   />
                 </div>
@@ -498,7 +644,7 @@ export default function AdminPortal() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="houseofsme@25"
+                    placeholder="Enter admin password"
                     className="w-full h-11 border border-border px-3 rounded-xl text-sm outline-none focus:border-accent bg-background"
                   />
                 </div>
@@ -513,20 +659,11 @@ export default function AdminPortal() {
                 </button>
               </form>
 
-              <div className="mt-6 border-t border-border pt-6">
-                <button
-                  type="button"
-                  onClick={bypassLogin}
-                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 bg-emerald-500/5 px-4 py-2.5 text-xs font-bold text-emerald-600 hover:bg-emerald-500/10 transition-colors"
-                >
-                  Auto-fill and Log In <ArrowRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
             </div>
           </section>
         ) : (
           /* Dashboard Screen */
-          <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <section className="mx-auto max-w-7xl px-4 pt-32 pb-8 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-6">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">smebhawan Operations</span>
@@ -596,15 +733,15 @@ export default function AdminPortal() {
             <div className="mt-8 grid gap-8 lg:grid-cols-3">
               
               {/* Left Side: Credit Underwriting Queue (2 cols) */}
-              <div className="lg:col-span-2 space-y-6">
-                <h2 className="font-display text-xl font-bold text-foreground">Buyer Credit Underwriting Board</h2>
+              <div className="lg:col-span-2 space-y-8">
+                <h2 className="font-display text-xl font-bold text-foreground">Buyer Contract Underwriting Board</h2>
 
                 {pendingCreditApprovals.length === 0 ? (
                   <div className="rounded-3xl border border-dashed border-white/10 bg-white/5 p-12 text-center backdrop-blur-md">
                     <FileText className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
-                    <p className="font-bold text-muted-foreground">No pending credit approvals</p>
+                    <p className="font-bold text-muted-foreground">No pending contract approvals</p>
                     <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                      Incoming credit-line buyer applications placed on the marketplace show up here for GSTIN and credit verification.
+                      Incoming buyer orders (Credit, COD, Online) show up here for credit vetting and supply confirmation.
                     </p>
                   </div>
                 ) : (
@@ -613,33 +750,55 @@ export default function AdminPortal() {
                       <div key={o.orderId} className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-sm space-y-4 backdrop-blur-md">
                         <div className="flex flex-wrap justify-between items-center border-b border-border pb-3 gap-2">
                           <div>
-                            <span className="text-[10px] font-bold text-muted-foreground">APPLICANT</span>
+                            <span className="text-[10px] font-bold text-muted-foreground">APPLICANT COMPANY</span>
                             <p className="font-bold text-sm text-foreground">{o.companyName}</p>
                             <p className="text-[10px] text-muted-foreground">{o.gstin}</p>
                           </div>
                           <div>
-                            <span className="text-[10px] font-bold text-muted-foreground">CREDIT REQUESTED</span>
+                            <span className="text-[10px] font-bold text-muted-foreground">CONTRACT VALUE</span>
                             <p className="text-xs font-bold text-accent">
                               ₹{o.totals.total.toLocaleString('en-IN', {maximumFractionDigits: 0})}
                             </p>
                           </div>
                           <div>
-                            <span className="text-[10px] font-bold text-muted-foreground">INTEREST RATE</span>
-                            <p className="text-xs font-bold text-foreground">16% p.a.</p>
+                            <span className="text-[10px] font-bold text-muted-foreground">SETTLEMENT METHOD</span>
+                            <p className="text-xs font-bold text-foreground uppercase">{o.creditTerms ? 'MSME Credit (16%)' : 'COD / Spot Cash'}</p>
                           </div>
                         </div>
 
-                        <div className="bg-muted p-3.5 rounded-2xl text-xs space-y-1.5">
-                          <p className="font-bold text-foreground">Risk Metrics Check:</p>
-                          <div className="flex justify-between text-muted-foreground text-[10px]">
-                            <span>GST Filing History: 24 Months Continuous</span>
-                            <span className="text-emerald-600 font-bold">PASS</span>
-                          </div>
-                          <div className="flex justify-between text-muted-foreground text-[10px]">
-                            <span>Bank Statements Audit: Debt-Service Coverage &gt; 1.5</span>
-                            <span className="text-emerald-600 font-bold">PASS</span>
-                          </div>
+                        {/* Items breakdown list */}
+                        <div className="space-y-1.5 text-xs border-t border-b border-border/40 py-3 my-2">
+                          <p className="font-bold text-muted-foreground text-[10px] uppercase">
+                            Materials in Contract ({o.items.length} {o.items.length === 1 ? 'Item' : 'Items'}):
+                          </p>
+                          {o.items.map((item, index) => (
+                            <div key={index} className="flex justify-between text-muted-foreground text-[11px]">
+                              <span>{item.productName} ({item.qty} MT)</span>
+                              <span className="font-semibold text-foreground">₹{item.costs.grandTotal.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span>
+                            </div>
+                          ))}
                         </div>
+
+                        {o.creditTerms ? (
+                          <div className="bg-muted/80 p-3.5 rounded-2xl text-xs space-y-1.5">
+                            <p className="font-bold text-foreground">Risk Metrics Check (MSME Credit):</p>
+                            <div className="flex justify-between text-muted-foreground text-[10px]">
+                              <span>GST Filing History: 24 Months Continuous</span>
+                              <span className="text-emerald-600 font-bold">PASS</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground text-[10px]">
+                              <span>Bank Statements Audit: Debt-Service Coverage &gt; 1.5</span>
+                              <span className="text-emerald-600 font-bold">PASS</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-muted/80 p-3.5 rounded-2xl text-xs space-y-1.5">
+                            <p className="font-bold text-foreground">Settlement Option:</p>
+                            <div className="text-muted-foreground text-[10px]">
+                              <span>This order is cleared via: <strong>{(o as any).paymentMethod || 'COD / Online Payment'}</strong>. No KYC underwriting required.</span>
+                            </div>
+                          </div>
+                        )}
 
                         <div className="grid grid-cols-2 gap-3 pt-2">
                           <button
@@ -647,14 +806,14 @@ export default function AdminPortal() {
                             onClick={() => rejectCredit(o.orderId)}
                             className="flex items-center justify-center gap-1.5 border border-border hover:bg-muted py-2.5 rounded-xl font-bold text-xs"
                           >
-                            <XCircle className="h-4 w-4 text-destructive" /> Reject Credit
+                            <XCircle className="h-4 w-4 text-destructive" /> Decline Order
                           </button>
                           <button
                             type="button"
                             onClick={() => approveCredit(o.orderId)}
                             className="flex items-center justify-center gap-1.5 bg-accent hover:bg-accent/90 py-2.5 rounded-xl font-bold text-xs text-accent-foreground"
                           >
-                            <CheckCircle className="h-4 w-4" /> Approve & Underwrite
+                            <CheckCircle className="h-4 w-4" /> Clear & Confirm Order
                           </button>
                         </div>
                       </div>
@@ -662,8 +821,83 @@ export default function AdminPortal() {
                   </div>
                 )}
 
+                {/* Supplier Vetting & Material Approval Queue */}
+                <div className="border-t border-white/10 pt-8 space-y-6">
+                  <h2 className="font-display text-xl font-bold text-foreground">Supplier Material Catalog Vetting</h2>
+                  {pendingProducts.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-white/10 bg-white/5 p-12 text-center backdrop-blur-md">
+                      <ShieldCheck className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
+                      <p className="font-bold text-muted-foreground">No pending material approvals</p>
+                      <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                        Supplier requests to list new catalog materials or update pricing/inventories appear here for review.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {pendingProducts.map((p) => (
+                        <div key={p.tempId} className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-sm space-y-4 backdrop-blur-md text-xs">
+                          <div className="flex justify-between items-center border-b border-border pb-3">
+                            <div>
+                              <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">PENDING APPROVAL</span>
+                              <h3 className="font-bold text-sm text-foreground mt-0.5">{p.name}</h3>
+                            </div>
+                            <span className="text-[10px] bg-primary/10 border border-primary/20 text-primary px-2.5 py-1 rounded-xl font-bold uppercase">
+                              {p.type === 'new' ? 'New Material' : 'Parameter Update'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4 text-muted-foreground">
+                            <div>
+                              <span className="block text-[10px] font-bold uppercase">Supplier</span>
+                              <span className="text-foreground font-semibold">{p.supplierCompany}</span>
+                              <span className="block text-[10px]">{p.supplierEmail}</span>
+                            </div>
+                            <div>
+                              <span className="block text-[10px] font-bold uppercase">Category</span>
+                              <span className="text-foreground font-semibold">{p.category}</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-muted p-3.5 rounded-2xl space-y-1.5">
+                            <div className="flex justify-between">
+                              <span>Proposed Price:</span>
+                              <strong className="text-foreground">₹{p.rate.toLocaleString('en-IN')}/{p.unit}</strong>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Proposed Inventory:</span>
+                              <strong className="text-foreground">{p.inventory} {p.unit}</strong>
+                            </div>
+                            {p.spec && (
+                              <div className="border-t border-border pt-1.5 mt-1.5 text-[10px] text-muted-foreground">
+                                <strong>Specs:</strong> {p.spec}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 pt-2">
+                            <button
+                              type="button"
+                              onClick={() => handlePendingProductDecision(p.tempId, 'rejected')}
+                              className="flex items-center justify-center gap-1.5 border border-border hover:bg-muted py-2.5 rounded-xl font-bold text-xs"
+                            >
+                              <XCircle className="h-4 w-4 text-destructive" /> Decline Listing
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePendingProductDecision(p.tempId, 'approved')}
+                              className="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 py-2.5 rounded-xl font-bold text-xs text-white"
+                            >
+                              <CheckCircle className="h-4 w-4 text-white" /> Clear & Publish
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Platform Order Board / Status Tracker */}
-                <div className="pt-4 space-y-6">
+                <div className="pt-8 space-y-6">
                   <h2 className="font-display text-xl font-bold text-foreground">Master Platform Ledger</h2>
                   
                   {orders.length === 0 ? (
@@ -884,7 +1118,14 @@ export default function AdminPortal() {
                                   <div className="text-[10px] text-muted-foreground">{u.phone}</div>
                                 </td>
                                 <td className="py-3 font-mono text-[10px]">{u.gstin}</td>
-                                <td className="py-3 text-right">
+                                <td className="py-3 text-right space-x-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditSupplierModal(u)}
+                                    className="bg-accent/10 border border-accent/20 hover:bg-accent/20 px-3 py-1.5 rounded-lg text-accent font-bold"
+                                  >
+                                    Edit Details
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => handleTerminateUser(u.id, u.email)}
@@ -1299,6 +1540,137 @@ export default function AdminPortal() {
           </section>
         )}
       </main>
+
+      {editingSupplier && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[99] flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-6 space-y-4 shadow-2xl relative text-xs text-foreground">
+            <button 
+              type="button" 
+              onClick={() => setEditingSupplier(null)}
+              className="absolute right-4 top-4 p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div>
+              <h2 className="font-display text-lg font-bold text-foreground">Edit Supplier Profile Details</h2>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Admin-managed supplier registry updates. Email updates will require OTP verification.</p>
+            </div>
+
+            <form onSubmit={handleSaveSupplier} className="space-y-3.5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Supplier Contact Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editSuppName}
+                    onChange={(e) => setEditSuppName(e.target.value)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Phone Number</label>
+                  <input
+                    type="tel"
+                    required
+                    value={editSuppPhone}
+                    onChange={(e) => setEditSuppPhone(e.target.value)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">Company Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editSuppCompany}
+                    onChange={(e) => setEditSuppCompany(e.target.value)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-semibold text-muted-foreground">GSTIN / Udyam</label>
+                  <input
+                    type="text"
+                    required
+                    value={editSuppGstin}
+                    onChange={(e) => setEditSuppGstin(e.target.value)}
+                    className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-muted-foreground">Place / City</label>
+                <input
+                  type="text"
+                  required
+                  value={editSuppPlace}
+                  onChange={(e) => setEditSuppPlace(e.target.value)}
+                  className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-muted-foreground">Supplier Registered Email</label>
+                <input
+                  type="email"
+                  required
+                  value={editSuppEmail}
+                  onChange={(e) => setEditSuppEmail(e.target.value)}
+                  className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground outline-none focus:border-accent"
+                />
+              </div>
+
+              {editSuppOtpSent && (
+                <div className="space-y-3.5 border-t border-white/10 pt-4 mt-2">
+                  {countdownNotification && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-2xl text-xs text-emerald-500 flex flex-col gap-1.5 animate-pulse mb-3">
+                      <div className="flex justify-between items-center">
+                        <span className="font-extrabold flex items-center gap-1">✉️ Email Change OTP Dispatched</span>
+                        <span className="bg-emerald-500 text-white font-bold px-2 py-0.5 rounded-lg text-[9px]">{countdownSeconds}s</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">{countdownNotification}</p>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="font-semibold text-muted-foreground text-[10px] uppercase">Enter 6-Digit OTP sent to new email *</label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      value={editSuppOtp}
+                      onChange={(e) => setEditSuppOtp(e.target.value)}
+                      placeholder="XXXXXX"
+                      className="w-full h-10 border border-border px-3 rounded-lg bg-background text-foreground text-center font-bold tracking-[0.2em] outline-none focus:border-accent"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-11 bg-accent text-accent-foreground py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-accent/15 transition-transform hover:-translate-y-0.5 mt-2"
+              >
+                {loading ? 'Processing Update...' : 'Save Supplier Details'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[999] bg-slate-900 border border-emerald-500/20 text-emerald-500 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-bounce">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+          <span className="text-xs font-bold font-sans tracking-wide">{toast.message}</span>
+        </div>
+      )}
 
       <Footer />
     </>
