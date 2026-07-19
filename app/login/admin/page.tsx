@@ -219,6 +219,12 @@ export default function AdminPortal() {
   }
 
   useEffect(() => {
+    // Check if session exists in sessionStorage to persist login
+    const adminSession = sessionStorage.getItem('admin_session')
+    if (adminSession === 'true') {
+      setIsLoggedIn(true)
+    }
+
     loadState()
     loadTeam()
     loadProducts()
@@ -226,6 +232,18 @@ export default function AdminPortal() {
     loadUsers()
     loadPendingProducts()
     
+    // Background polling every 6 seconds to fetch updates automatically
+    const intervalId = setInterval(() => {
+      const activeSession = sessionStorage.getItem('admin_session')
+      if (activeSession === 'true') {
+        loadState()
+        loadProducts()
+        loadDoubts()
+        loadUsers()
+        loadPendingProducts()
+      }
+    }, 6000)
+
     const syncAll = () => {
       loadState()
       loadTeam()
@@ -236,7 +254,10 @@ export default function AdminPortal() {
     }
     
     window.addEventListener('storage', syncAll)
-    return () => window.removeEventListener('storage', syncAll)
+    return () => {
+      window.removeEventListener('storage', syncAll)
+      clearInterval(intervalId)
+    }
   }, [])
 
   const handleLogin = (e: React.FormEvent) => {
@@ -248,6 +269,7 @@ export default function AdminPortal() {
     setLoading(true)
     setTimeout(() => {
       setIsLoggedIn(true)
+      sessionStorage.setItem('admin_session', 'true')
       setLoading(false)
     }, 600)
   }
@@ -382,18 +404,29 @@ export default function AdminPortal() {
   }
 
   const handleVetteSupplier = async (id: string, email: string, outcome: 'verified' | 'rejected') => {
+    const oldUsers = [...usersList]
+
+    // Optimistically update the UI state immediately
+    if (outcome === 'verified') {
+      setUsersList((prev) =>
+        prev.map((u) => (u.id === id ? { ...u, status: 'verified' as const } : u))
+      )
+      showToast('Supplier verification approved! Notification email is being sent.', 'success')
+    } else {
+      setUsersList((prev) => prev.filter((u) => u.id !== id))
+      showToast('Supplier registration rejected & profile removed.', 'info')
+    }
+
     try {
       if (outcome === 'verified') {
         const updated = await updateUserProfile(id, { status: 'verified' })
-        if (updated) {
-          showToast('Supplier verification approved! Notification email sent via SMTP.', 'success')
-        }
+        if (!updated) throw new Error('Database update failed')
       } else {
         await terminateUserProfile(id)
-        showToast('Supplier registration rejected & profile removed.', 'info')
       }
 
-      await fetch('/api/send-email', {
+      // Dispatch notification email in background without blocking UI
+      fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -401,12 +434,15 @@ export default function AdminPortal() {
           email,
           status: outcome
         })
-      })
+      }).catch((err) => console.error('Background email dispatch failed:', err))
 
+      // Refresh final data to sync fully with DB
       loadUsers()
     } catch (err) {
       console.error(err)
-      showToast('Error terminating user profile registry.', 'error')
+      // Rollback to previous state on failure
+      setUsersList(oldUsers)
+      showToast('Error updating supplier verification status. Rolled back.', 'error')
     }
   }
 
@@ -530,50 +566,91 @@ export default function AdminPortal() {
   const approveCredit = async (orderId: string) => {
     const target = orders.find((o) => o.orderId === orderId)
     if (!target) return
+    const oldOrders = [...orders]
     const updates = {
       status: 'Confirmed' as const,
       creditTerms: target.creditTerms ? { ...target.creditTerms, status: 'Approved' } : null,
     }
-    const updated = await updateDbOrder(orderId, updates)
-    if (updated) {
-      setOrders(orders.map((o) => o.orderId === orderId ? { ...o, ...updates } : o))
-      showToast('Credit underwriting cleared. Contract status set to "Confirmed" and routed to Supplier allocations.', 'success')
+
+    // Optimistically update state
+    setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, ...updates } : o)))
+    showToast('Credit underwriting cleared. Contract status set to "Confirmed" and routed to Supplier allocations.', 'success')
+
+    try {
+      const updated = await updateDbOrder(orderId, updates)
+      if (!updated) {
+        setOrders(oldOrders)
+        showToast('Failed to update order status in database.', 'error')
+      }
+    } catch (err) {
+      console.error(err)
+      setOrders(oldOrders)
+      showToast('Error updating order status.', 'error')
     }
   }
 
   const rejectCredit = async (orderId: string) => {
     const target = orders.find((o) => o.orderId === orderId)
     if (!target) return
+    const oldOrders = [...orders]
     const updates = {
       status: 'Placed' as const,
       creditTerms: target.creditTerms ? { ...target.creditTerms, status: 'Rejected' } : null,
     }
-    const updated = await updateDbOrder(orderId, updates)
-    if (updated) {
-      setOrders(orders.map((o) => o.orderId === orderId ? { ...o, ...updates } : o))
-      showToast('Credit application declined.', 'info')
+
+    // Optimistically update state
+    setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, ...updates } : o)))
+    showToast('Credit application declined.', 'info')
+
+    try {
+      const updated = await updateDbOrder(orderId, updates)
+      if (!updated) {
+        setOrders(oldOrders)
+        showToast('Failed to decline credit application in database.', 'error')
+      }
+    } catch (err) {
+      console.error(err)
+      setOrders(oldOrders)
+      showToast('Error updating order status.', 'error')
     }
   }
 
   // Clear Shipment delivery (Delivery verification)
   const verifyDelivery = async (orderId: string) => {
+    const oldOrders = [...orders]
     const updates = {
       status: 'Delivered' as const,
     }
-    const updated = await updateDbOrder(orderId, updates)
-    if (updated) {
-      setOrders(orders.map((o) => o.orderId === orderId ? { ...o, ...updates } : o))
-      showToast('Delivery cleared. MSMED 45-day payment countdown timer initiated.', 'success')
+
+    // Optimistically update state
+    setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, ...updates } : o)))
+    showToast('Delivery cleared. MSMED 45-day payment countdown timer initiated.', 'success')
+
+    try {
+      const updated = await updateDbOrder(orderId, updates)
+      if (!updated) {
+        setOrders(oldOrders)
+        showToast('Failed to verify delivery in database.', 'error')
+      }
+    } catch (err) {
+      console.error(err)
+      setOrders(oldOrders)
+      showToast('Error updating delivery status.', 'error')
     }
   }
 
   const handlePendingProductDecision = async (tempId: string, decision: 'approved' | 'rejected') => {
+    const oldPending = [...pendingProducts]
+
+    // Optimistically update the UI state immediately
+    setPendingProducts((prev) => prev.filter((p) => p.tempId !== tempId))
+    showToast(`Supplier listing proposal successfully ${decision}! Notification email is being sent.`, 'success')
+
     try {
       const details = await updatePendingProductStatus(tempId, decision)
       if (details) {
-        showToast(`Supplier listing proposal successfully ${decision}!`, 'success')
-        
-        await fetch('/api/send-email', {
+        // Dispatch notification email in background without blocking UI
+        fetch('/api/send-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -585,15 +662,20 @@ export default function AdminPortal() {
               status: decision
             }
           })
-        })
+        }).catch((err) => console.error('Background email dispatch failed:', err))
 
+        // Sync final data in background
         loadPendingProducts()
         loadProducts()
       } else {
+        // Rollback state on database failure
+        setPendingProducts(oldPending)
         showToast('Could not update listing request status.', 'error')
       }
     } catch (err) {
       console.error(err)
+      // Rollback state on error
+      setPendingProducts(oldPending)
       showToast('Vetting decision propagation failed.', 'error')
     }
   }
@@ -674,7 +756,10 @@ export default function AdminPortal() {
               </div>
               <button
                 type="button"
-                onClick={() => setIsLoggedIn(false)}
+                onClick={() => {
+                  setIsLoggedIn(false)
+                  sessionStorage.removeItem('admin_session')
+                }}
                 className="self-start text-xs font-bold border border-border px-4 py-2 rounded-xl text-muted-foreground hover:text-foreground"
               >
                 Log Out

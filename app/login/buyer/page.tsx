@@ -119,10 +119,10 @@ export default function BuyerPortal() {
     setTimeout(() => setToast(null), 4000)
   }
 
-  // Load session from localStorage on mount
+  // Load session from sessionStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const activeSession = localStorage.getItem('smebhawan_user_session')
+      const activeSession = sessionStorage.getItem('smebhawan_user_session')
       if (activeSession) {
         try {
           const parsed = JSON.parse(activeSession)
@@ -130,10 +130,10 @@ export default function BuyerPortal() {
             setIsLoggedIn(true)
             setSession(parsed)
           } else {
-            localStorage.removeItem('smebhawan_user_session')
+            sessionStorage.removeItem('smebhawan_user_session')
           }
         } catch (e) {
-          localStorage.removeItem('smebhawan_user_session')
+          sessionStorage.removeItem('smebhawan_user_session')
         }
       }
     }
@@ -269,7 +269,7 @@ export default function BuyerPortal() {
         })
 
         // Set login state
-        localStorage.setItem('smebhawan_user_session', JSON.stringify(newProfile))
+        sessionStorage.setItem('smebhawan_user_session', JSON.stringify(newProfile))
         setSession(newProfile)
         setIsLoggedIn(true)
         await triggerLoginAlertEmail(newProfile.email, 'Customer Portal')
@@ -277,7 +277,7 @@ export default function BuyerPortal() {
         // Log in existing profile
         const existingProfile = await getUserProfileByEmail(email)
         if (existingProfile) {
-          localStorage.setItem('smebhawan_user_session', JSON.stringify(existingProfile))
+          sessionStorage.setItem('smebhawan_user_session', JSON.stringify(existingProfile))
           setSession(existingProfile)
           setIsLoggedIn(true)
           await triggerLoginAlertEmail(existingProfile.email, 'Customer Portal')
@@ -292,7 +292,7 @@ export default function BuyerPortal() {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('smebhawan_user_session')
+    sessionStorage.removeItem('smebhawan_user_session')
     setSession(null)
     setIsLoggedIn(false)
     setOtpSent(false)

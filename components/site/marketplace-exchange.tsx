@@ -236,7 +236,7 @@ export function MarketplaceExchange() {
     loadProducts()
     
     if (typeof window !== 'undefined') {
-      const activeSession = localStorage.getItem('smebhawan_user_session')
+      const activeSession = sessionStorage.getItem('smebhawan_user_session')
       if (activeSession) {
         try {
           const parsed = JSON.parse(activeSession)
@@ -253,7 +253,7 @@ export function MarketplaceExchange() {
 
     const handleStorageChange = () => {
       loadProducts()
-      const activeSession = localStorage.getItem('smebhawan_user_session')
+      const activeSession = sessionStorage.getItem('smebhawan_user_session')
       if (activeSession) {
         try {
           const parsed = JSON.parse(activeSession)
@@ -1164,7 +1164,7 @@ export function MarketplaceExchange() {
                     <button
                       type="button"
                       onClick={() => {
-                        localStorage.removeItem('smebhawan_user_session');
+                        sessionStorage.removeItem('smebhawan_user_session');
                         setSession(null);
                         window.dispatchEvent(new Event('storage'));
                       }}
